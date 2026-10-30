@@ -178,7 +178,7 @@ function Shape({ shape, color, ghost }) {
 // 漂浮参数：以日期为种子，保证同一颗星每次渲染轨迹一致；
 // 方向、幅度、周期、相位都单独随机，整体看起来更自然。
 // 星点本体与印痕卫星共用同一份参数，卫星才能始终贴合在星点的相对位置上
-function starMotionStyle(dateKey, motion) {
+export function starMotionStyle(dateKey, motion) {
   if (!motion || !motion.enabled) return { animation: 'none' };
   const rnd = seededRandom(dateKey + '-m');
   const ampScale = 0.55 + rnd() * 0.45;

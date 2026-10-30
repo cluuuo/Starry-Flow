@@ -1,11 +1,18 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { tierIndex, nextTier, tierBrightness, tierGlow, tierHex, seededRandom } from '../lib/logic';
+import { starMotionStyle } from './StarField';
+import SkyBackdrop from './SkyBackdrop';
+import MeteorLayer from './MeteorLayer';
 
 const STATUS_TEXT = {
   focusing: '专注中',
   paused: '已暂停',
   idle: '空闲'
 };
+
+// 极简模式圆环中心的大号星点，与星图共用同一轮廓
+const STAR4_PATH =
+  'M50 7 C54 30 65 41 93 50 C65 59 54 70 50 93 C46 70 35 59 7 50 C35 41 46 30 50 7 Z';
 
 // 没有取到图标时，用进程名首字母兜底
 function ProcessIcon({ name, icon }) {
@@ -46,18 +53,23 @@ function StrictMeteors() {
   );
 }
 
-export default function FocusPanel({ focus, todayPoints, tiers, starColor, notice, connected, onCommand }) {
-  const [noticeClosed, setNoticeClosed] = useState(false);
+export default function FocusPanel({
+  focus,
+  todayPoints,
+  tiers,
+  starColor,
+  connected,
+  onCommand,
+  motion,
+  sky,
+  variant = 'classic'
+}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState(null);
   const [iconMap, setIconMap] = useState({});
   const iconMapRef = useRef({});
   const iconPending = useRef(new Set());
-
-  useEffect(() => {
-    setNoticeClosed(false);
-  }, [notice?.id]);
 
   const settings = focus?.settings || null;
   const strict = settings?.strict || null;
@@ -146,15 +158,193 @@ export default function FocusPanel({ focus, todayPoints, tiers, starColor, notic
     onCommand('set_strict', { enabled: !strict.enabled });
   };
 
+  const pickerModal = pickerOpen && (
+    <div className="picker-mask" onClick={closePicker}>
+      <div className="picker-window" onClick={(e) => e.stopPropagation()}>
+        <div className="picker-head">
+          <span>选择专注进程</span>
+          <button className="picker-close" onClick={closePicker}>×</button>
+        </div>
+        <div className="picker-search-row">
+          <input
+            className="picker-search"
+            autoFocus
+            placeholder="搜索进程名称或窗口标题"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <button className="picker-refresh" onClick={() => onCommand('refresh_processes')}>
+            刷新
+          </button>
+        </div>
+        <div className="picker-list">
+          {options.map((p) => (
+            <button
+              key={p.pid}
+              className={`picker-item ${p.pid === selectedPid ? 'on' : ''}`}
+              onClick={() => choose(p)}
+            >
+              <span className="picker-item-icon">
+                <ProcessIcon name={p.name} icon={p.path ? iconMap[p.path] : null} />
+              </span>
+              <span className="picker-item-main">
+                <span className="picker-item-name">{p.name}</span>
+                <span className="picker-item-title">{p.title}</span>
+              </span>
+              <span className="picker-item-pid">PID {p.pid}</span>
+            </button>
+          ))}
+          {!options.length && <div className="picker-empty">没有匹配的进程</div>}
+        </div>
+        <div className="picker-foot">
+          只列出有可见窗口的程序，共 {processes.length} 个
+        </div>
+      </div>
+    </div>
+  );
+
+  // 极简模式：圆环进度包裹星点与积分，只保留操作必需信息
+  if (variant === 'compact') {
+    const progress = Math.max(0, Math.min(1, todayPoints / lastTierPoints));
+    const radius = 92;
+    const circumference = 2 * Math.PI * radius;
+    const litColor = level >= 0 ? tierHex(starColor, level, tier) : starColor;
+    const ringColor = focusLost ? '#ff5f57' : litColor;
+
+    return (
+      <div className="focus-panel focus-panel-compact card">
+        <SkyBackdrop
+          density={sky?.density ?? 1}
+          duration={sky?.duration ?? 90}
+          animated={sky?.animated !== false}
+        />
+        <MeteorLayer enabled={sky?.animated !== false} />
+
+        <div className="compact-head">
+          <span className="focus-app-icon">
+            <ProcessIcon name={currentName} icon={currentIcon} />
+          </span>
+          <span className="focus-app-text">
+            <span className="focus-app-name">
+              {connected ? (currentName || '尚未选择进程') : '采集端未连接'}
+            </span>
+            <span className="focus-app-sub">
+              {connected
+                ? (currentName
+                  ? `PID ${selectedPid} · ${STATUS_TEXT[status] || status}`
+                  : '选择一个应用作为专注目标')
+                : '专注数据暂不可用'}
+            </span>
+          </span>
+          <button className="focus-pick-btn" disabled={!connected} onClick={openPicker}>
+            {currentName ? '更换进程' : '选择进程'}
+          </button>
+        </div>
+
+        <div className="compact-strict">
+          <span className="focus-strict-label">严格模式</span>
+          <span className="focus-strict-hint">
+            {strict?.enabled ? '离开进程会持续扣除积分' : '离开进程不会扣除积分'}
+          </span>
+          <button
+            className={`switch ${strict?.enabled ? 'on' : ''}`}
+            disabled={!connected || !strict}
+            role="switch"
+            aria-checked={!!strict?.enabled}
+            aria-label="严格模式"
+            onClick={toggleStrict}
+          >
+            <span className="switch-knob" />
+          </button>
+        </div>
+
+        <div className="compact-ring">
+          <svg viewBox="0 0 200 200" className="compact-ring-svg" aria-hidden="true">
+            <circle cx="100" cy="100" r={radius} className="compact-ring-track" />
+            <circle
+              cx="100"
+              cy="100"
+              r={radius}
+              className="compact-ring-glow"
+              style={{
+                stroke: ringColor,
+                strokeDasharray: circumference.toFixed(2),
+                strokeDashoffset: (circumference * (1 - progress)).toFixed(2)
+              }}
+              transform="rotate(-90 100 100)"
+            />
+            <circle
+              cx="100"
+              cy="100"
+              r={radius}
+              className="compact-ring-fill"
+              style={{
+                stroke: ringColor,
+                strokeDasharray: circumference.toFixed(2),
+                strokeDashoffset: (circumference * (1 - progress)).toFixed(2)
+              }}
+              transform="rotate(-90 100 100)"
+            />
+          </svg>
+          <div className="compact-ring-center">
+            <svg
+              className="compact-star"
+              viewBox="0 0 100 100"
+              style={{
+                ...starMotionStyle('compact-star', motion),
+                color: litColor,
+                filter: level >= 0
+                  ? `brightness(${tierBrightness(tier, level).toFixed(2)}) drop-shadow(0 0 ${(6 + tierGlow(tier, level) * 10).toFixed(1)}px ${litColor})`
+                  : 'none'
+              }}
+            >
+              <path d={STAR4_PATH} fill="currentColor" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" />
+            </svg>
+            <div
+              className={`compact-points${focusLost ? ' lost' : ''}`}
+              style={!focusLost
+                ? {
+                  color: litColor,
+                  filter: `brightness(${level >= 0 ? tierBrightness(tier, level).toFixed(2) : 0.9})`
+                }
+                : undefined}
+            >
+              {todayPoints.toLocaleString()}
+            </div>
+          </div>
+        </div>
+
+        {strict?.enabled && (
+          <div className="compact-meta">结算门槛 {strict.threshold.toLocaleString()}</div>
+        )}
+        {focus?.penalty_active && (
+          <div className="focus-warn">{focus?.warn_message || '已离开专注进程，积分正在扣除'}</div>
+        )}
+
+        <div className="compact-buttons">
+          <button
+            className={`focus-main-btn${!running && status !== 'paused' ? ' solid' : ''}`}
+            disabled={!connected || (!selectedPid && !running)}
+            onClick={toggleRun}
+          >
+            {running ? '暂停计时' : status === 'paused' ? '继续专注' : '开始专注'}
+          </button>
+          <button
+            className="focus-sub-btn"
+            disabled={!connected}
+            onClick={() => onCommand('settle')}
+          >
+            每日结算
+          </button>
+        </div>
+
+        {pickerModal}
+      </div>
+    );
+  }
+
   return (
     <div className="focus-panel card">
-      {notice && !noticeClosed && (
-        <div className={`notice-bar ${notice.ok ? 'ok' : 'fail'}`}>
-          <span>{notice.message}</span>
-          <button className="notice-close" onClick={() => setNoticeClosed(true)}>×</button>
-        </div>
-      )}
-
       <div className="focus-head">
         <div className="focus-app">
           <span className="focus-app-icon">
@@ -302,50 +492,7 @@ export default function FocusPanel({ focus, todayPoints, tiers, starColor, notic
         </div>
       </div>
 
-      {pickerOpen && (
-        <div className="picker-mask" onClick={closePicker}>
-          <div className="picker-window" onClick={(e) => e.stopPropagation()}>
-            <div className="picker-head">
-              <span>选择专注进程</span>
-              <button className="picker-close" onClick={closePicker}>×</button>
-            </div>
-            <div className="picker-search-row">
-              <input
-                className="picker-search"
-                autoFocus
-                placeholder="搜索进程名称或窗口标题"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              <button className="picker-refresh" onClick={() => onCommand('refresh_processes')}>
-                刷新
-              </button>
-            </div>
-            <div className="picker-list">
-              {options.map((p) => (
-                <button
-                  key={p.pid}
-                  className={`picker-item ${p.pid === selectedPid ? 'on' : ''}`}
-                  onClick={() => choose(p)}
-                >
-                  <span className="picker-item-icon">
-                    <ProcessIcon name={p.name} icon={p.path ? iconMap[p.path] : null} />
-                  </span>
-                  <span className="picker-item-main">
-                    <span className="picker-item-name">{p.name}</span>
-                    <span className="picker-item-title">{p.title}</span>
-                  </span>
-                  <span className="picker-item-pid">PID {p.pid}</span>
-                </button>
-              ))}
-              {!options.length && <div className="picker-empty">没有匹配的进程</div>}
-            </div>
-            <div className="picker-foot">
-              只列出有可见窗口的程序，共 {processes.length} 个
-            </div>
-          </div>
-        </div>
-      )}
+      {pickerModal}
     </div>
   );
 }

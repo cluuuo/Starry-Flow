@@ -24,6 +24,17 @@ contextBridge.exposeInMainWorld('api', {
   saveMarkImageAs: (payload) => ipcRenderer.invoke('marks:saveAs', payload),
   windowControl: (action) => ipcRenderer.send('window:control', action),
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  getWindowMode: () => ipcRenderer.invoke('window:get-mode'),
+  setWindowMode: (mode) => ipcRenderer.invoke('window:set-mode', mode),
+  onWindowMode: (cb) => {
+    const handler = (_event, mode) => cb(mode);
+    ipcRenderer.on('window:mode', handler);
+    return () => ipcRenderer.removeListener('window:mode', handler);
+  },
+  miniDragStart: () => ipcRenderer.send('mini:drag-start'),
+  miniDragMove: () => ipcRenderer.send('mini:drag-move'),
+  miniDragEnd: () => ipcRenderer.send('mini:drag-end'),
+  activateMini: () => ipcRenderer.send('mini:activate'),
   onWindowMaximized: (cb) => {
     const handler = (_event, maximized) => cb(maximized);
     ipcRenderer.on('window:maximized', handler);

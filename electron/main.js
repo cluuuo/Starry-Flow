@@ -14,6 +14,10 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    if (currentMode === 'mini') {
+      setWindowMode('compact');
+      return;
+    }
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -261,67 +265,272 @@ function dateStamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
 }
 
-// ---------- 窗口位置记忆 ----------
-function loadWindowState() {
-  const fallback = { width: 1360, height: 900 };
-  const saved = readJsonSafe(WINDOW_STATE_FILE);
-  const size = saved && Number.isFinite(Number(saved.width)) && Number.isFinite(Number(saved.height))
-    ? {
-      width: Math.max(1100, Math.round(Number(saved.width))),
-      height: Math.max(760, Math.round(Number(saved.height)))
-    }
-    : fallback;
+// ---------- 窗口模式与位置记忆 ----------
+// 三种模式各自记住位置：classic 记尺寸与最大化，compact / mini 只记坐标
+const MAIN_MIN = { width: 1100, height: 760 };
+const COMPACT_MIN = { width: 360, height: 560 };
+const COMPACT_DEFAULT = { width: 424, height: 704 };
+const MINI_SIZE = { width: 220, height: 200 };
 
-  // 换显示器或拔掉副屏后，旧坐标可能落在屏幕外，此时回到主屏居中
-  if (saved && Number.isFinite(Number(saved.x)) && Number.isFinite(Number(saved.y))) {
-    const visible = screen.getAllDisplays().some((d) => {
-      const a = d.workArea;
-      const overlapX = Math.min(saved.x + size.width, a.x + a.width) - Math.max(saved.x, a.x);
-      const overlapY = Math.min(saved.y + size.height, a.y + a.height) - Math.max(saved.y, a.y);
-      return overlapX >= 160 && overlapY >= 100;
-    });
-    if (visible) {
-      return {
-        ...size,
-        x: Math.round(Number(saved.x)),
-        y: Math.round(Number(saved.y)),
-        maximized: !!saved.maximized
-      };
-    }
-  }
-
-  const area = screen.getPrimaryDisplay().workArea;
-  return {
-    ...size,
-    x: Math.round(area.x + (area.width - size.width) / 2),
-    y: Math.round(area.y + (area.height - size.height) / 2),
-    maximized: false
-  };
-}
-
+let appState = null;
+let currentMode = 'classic';
+let mainMode = 'classic';
+let miniWindow = null;
+let miniDragState = null;
 let windowStateTimer = null;
 
-function saveWindowState(win) {
-  if (!win || win.isDestroyed()) return;
-  const bounds = win.isMaximized() ? win.getNormalBounds() : win.getBounds();
-  writeJsonSafe(WINDOW_STATE_FILE, {
-    x: bounds.x,
-    y: bounds.y,
-    width: bounds.width,
-    height: bounds.height,
-    maximized: win.isMaximized()
+function isVisibleOnAnyDisplay(x, y, width, height) {
+  return screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    const overlapX = Math.min(x + width, a.x + a.width) - Math.max(x, a.x);
+    const overlapY = Math.min(y + height, a.y + a.height) - Math.max(y, a.y);
+    return overlapX >= 160 && overlapY >= 100;
   });
 }
 
-function createWindow() {
-  const state = loadWindowState();
+function normalizePos(obj) {
+  return obj && Number.isFinite(Number(obj.x)) && Number.isFinite(Number(obj.y))
+    ? { x: Math.round(Number(obj.x)), y: Math.round(Number(obj.y)) }
+    : null;
+}
+
+// 极简模式允许缩放，尺寸也一并记住
+function normalizeRect(obj) {
+  const pos = normalizePos(obj);
+  if (!pos) return null;
+  const width = Number(obj.width);
+  const height = Number(obj.height);
+  return {
+    ...pos,
+    ...(Number.isFinite(width) && Number.isFinite(height)
+      ? { width: Math.round(width), height: Math.round(height) }
+      : {})
+  };
+}
+
+// 兼容旧版只存一份主窗口状态的格式
+function loadAppState() {
+  const saved = readJsonSafe(WINDOW_STATE_FILE) || {};
+  const legacyClassic = Number.isFinite(Number(saved.width)) && Number.isFinite(Number(saved.height))
+    ? {
+      x: Math.round(Number(saved.x)),
+      y: Math.round(Number(saved.y)),
+      width: Math.round(Number(saved.width)),
+      height: Math.round(Number(saved.height)),
+      maximized: !!saved.maximized
+    }
+    : null;
+  return {
+    mode: ['classic', 'compact', 'mini'].includes(saved.mode) ? saved.mode : 'classic',
+    mainMode: saved.mainMode === 'compact' ? 'compact' : 'classic',
+    classic: saved.classic && typeof saved.classic === 'object' ? saved.classic : legacyClassic,
+    compact: normalizeRect(saved.compact),
+    mini: normalizePos(saved.mini)
+  };
+}
+
+function persistAppState() {
+  writeJsonSafe(WINDOW_STATE_FILE, appState);
+}
+
+function centered(area, width, height) {
+  return {
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: Math.round(area.y + (area.height - height) / 2)
+  };
+}
+
+function classicBounds() {
+  const saved = appState.classic || {};
+  const area = screen.getPrimaryDisplay().workArea;
+  const width = Math.max(MAIN_MIN.width, Math.round(Number(saved.width) || 1360));
+  const height = Math.max(MAIN_MIN.height, Math.round(Number(saved.height) || 900));
+  if (Number.isFinite(Number(saved.x)) && Number.isFinite(Number(saved.y))) {
+    const x = Math.round(Number(saved.x));
+    const y = Math.round(Number(saved.y));
+    if (isVisibleOnAnyDisplay(x, y, width, height)) return { x, y, width, height };
+  }
+  return { ...centered(area, width, height), width, height };
+}
+
+function compactBounds() {
+  const area = screen.getPrimaryDisplay().workArea;
+  const saved = appState.compact || {};
+  const width = Math.min(
+    Math.max(COMPACT_MIN.width, Math.round(Number(saved.width) || COMPACT_DEFAULT.width)),
+    Math.max(COMPACT_MIN.width, area.width - 16)
+  );
+  const height = Math.min(
+    Math.max(COMPACT_MIN.height, Math.round(Number(saved.height) || COMPACT_DEFAULT.height)),
+    Math.max(COMPACT_MIN.height, area.height - 24)
+  );
+  const pos = normalizePos(saved);
+  if (pos && isVisibleOnAnyDisplay(pos.x, pos.y, width, height)) {
+    return { x: pos.x, y: pos.y, width, height };
+  }
+  return { ...centered(area, width, height), width, height };
+}
+
+function miniBounds() {
+  const area = screen.getPrimaryDisplay().workArea;
+  const saved = appState.mini;
+  if (saved && isVisibleOnAnyDisplay(saved.x, saved.y, MINI_SIZE.width, MINI_SIZE.height)) {
+    return { x: saved.x, y: saved.y, ...MINI_SIZE };
+  }
+  // 默认贴在屏幕最上方居中
+  return {
+    x: Math.round(area.x + (area.width - MINI_SIZE.width) / 2),
+    y: area.y + 16,
+    ...MINI_SIZE
+  };
+}
+
+function saveMainState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const bounds = mainWindow.isMaximized() ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+  if (mainMode === 'compact') {
+    appState.compact = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height
+    };
+  } else {
+    appState.classic = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      maximized: mainWindow.isMaximized()
+    };
+  }
+  persistAppState();
+}
+
+function scheduleSaveMainState() {
+  clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(saveMainState, 600);
+}
+
+function applyMainMode(mode) {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  mainMode = mode;
+  appState.mainMode = mode;
+  if (mode === 'compact') {
+    win.setMinimumSize(COMPACT_MIN.width, COMPACT_MIN.height);
+    if (win.isMaximized()) win.unmaximize();
+    win.setBounds(compactBounds());
+    // 极简模式允许用户自行缩放，尺寸会随窗口状态一起记住
+    win.setResizable(true);
+    win.setAlwaysOnTop(false);
+  } else {
+    win.setResizable(true);
+    win.setMinimumSize(MAIN_MIN.width, MAIN_MIN.height);
+    if (win.isMaximized()) win.unmaximize();
+    win.setBounds(classicBounds());
+    if (appState.classic && appState.classic.maximized) win.maximize();
+    win.setAlwaysOnTop(false);
+  }
+  if (!win.isDestroyed()) win.webContents.send('window:mode', mode);
+}
+
+function createMiniWindow() {
   const win = new BrowserWindow({
-    x: state.x,
-    y: state.y,
-    width: state.width,
-    height: state.height,
-    minWidth: 1100,
-    minHeight: 760,
+    ...miniBounds(),
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    show: false,
+    title: 'Starry Flow 星流',
+    icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  miniWindow = win;
+  win.setAlwaysOnTop(true, 'floating');
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed() && currentMode === 'mini') win.showInactive();
+  });
+  win.on('closed', () => {
+    miniWindow = null;
+    bootLog('迷你窗口已关闭');
+    // 主窗口此时是隐藏的，重新显示为极简，避免应用没有任何可见窗口
+    if (currentMode === 'mini' && mainWindow && !mainWindow.isDestroyed()) {
+      currentMode = 'compact';
+      appState.mode = 'compact';
+      applyMainMode('compact');
+      mainWindow.show();
+      mainWindow.focus();
+      persistAppState();
+    }
+  });
+  win.webContents.on('render-process-gone', (_e, details) => {
+    bootLog(`迷你窗口渲染进程退出 reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+  if (isDev) {
+    win.loadURL('http://localhost:5173/?mode=mini');
+  } else {
+    win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { search: 'mode=mini' });
+  }
+}
+
+function showMiniWindow() {
+  if (!miniWindow || miniWindow.isDestroyed()) {
+    createMiniWindow();
+    return;
+  }
+  miniWindow.showInactive();
+}
+
+function setWindowMode(mode) {
+  if (!appState) return currentMode;
+  if (!['classic', 'compact', 'mini'].includes(mode) || mode === currentMode) return currentMode;
+
+  if (mode === 'mini') {
+    saveMainState();
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+    showMiniWindow();
+  } else if (currentMode === 'mini') {
+    if (miniWindow && !miniWindow.isDestroyed()) miniWindow.hide();
+    applyMainMode(mode);
+    // 等渲染层按新模式重排完再显示，避免闪一帧旧布局
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }, 120);
+  } else {
+    saveMainState();
+    applyMainMode(mode);
+  }
+
+  currentMode = mode;
+  appState.mode = mode;
+  persistAppState();
+  return currentMode;
+}
+
+function createWindow(mode) {
+  const compact = mode === 'compact';
+  const bounds = compact ? compactBounds() : classicBounds();
+  const win = new BrowserWindow({
+    ...bounds,
+    minWidth: compact ? COMPACT_MIN.width : MAIN_MIN.width,
+    minHeight: compact ? COMPACT_MIN.height : MAIN_MIN.height,
+    resizable: true,
+    show: false,
     backgroundColor: '#060e24',
     title: 'Starry Flow 星流',
     icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
@@ -335,15 +544,19 @@ function createWindow() {
   });
 
   mainWindow = win;
-  if (state.maximized) win.maximize();
+  mainMode = compact ? 'compact' : 'classic';
+  appState.mainMode = mainMode;
+  if (!compact && appState.classic && appState.classic.maximized) win.maximize();
+
+  win.once('ready-to-show', () => {
+    if (win.isDestroyed()) return;
+    if (currentMode === 'mini') win.hide();
+    else win.show();
+  });
 
   // 拖动/缩放结束后延迟落盘，避免高频写文件
-  const rememberState = () => {
-    clearTimeout(windowStateTimer);
-    windowStateTimer = setTimeout(() => saveWindowState(win), 600);
-  };
-  win.on('resize', rememberState);
-  win.on('move', rememberState);
+  win.on('resize', scheduleSaveMainState);
+  win.on('move', scheduleSaveMainState);
   // 自绘按钮需要知道当前是否已最大化，用于切换「最大化 / 还原」图标
   const notifyMaximized = () => {
     if (!win.isDestroyed()) win.webContents.send('window:maximized', win.isMaximized());
@@ -352,7 +565,7 @@ function createWindow() {
   win.on('unmaximize', notifyMaximized);
   win.on('close', () => {
     clearTimeout(windowStateTimer);
-    saveWindowState(win);
+    saveMainState();
   });
 
   if (isDev) {
@@ -399,6 +612,34 @@ app.whenReady().then(() => {
   ipcMain.handle('window:is-maximized', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     return win ? win.isMaximized() : false;
+  });
+
+  // 三种显示模式的切换与查询
+  ipcMain.handle('window:get-mode', () => currentMode);
+  ipcMain.handle('window:set-mode', (_event, mode) => setWindowMode(mode));
+
+  // 迷你窗口：点击切回极简，或拖动整窗移动
+  ipcMain.on('mini:activate', () => setWindowMode('compact'));
+  ipcMain.on('mini:drag-start', () => {
+    if (!miniWindow || miniWindow.isDestroyed()) return;
+    const [wx, wy] = miniWindow.getPosition();
+    const pt = screen.getCursorScreenPoint();
+    miniDragState = { wx, wy, cx: pt.x, cy: pt.y };
+  });
+  ipcMain.on('mini:drag-move', () => {
+    if (!miniWindow || miniWindow.isDestroyed() || !miniDragState) return;
+    const pt = screen.getCursorScreenPoint();
+    miniWindow.setPosition(
+      Math.round(miniDragState.wx + pt.x - miniDragState.cx),
+      Math.round(miniDragState.wy + pt.y - miniDragState.cy)
+    );
+  });
+  ipcMain.on('mini:drag-end', () => {
+    miniDragState = null;
+    if (!miniWindow || miniWindow.isDestroyed()) return;
+    const [x, y] = miniWindow.getPosition();
+    appState.mini = { x, y };
+    persistAppState();
   });
 
   ipcMain.handle('settings:set', (_event, settings) => {
@@ -729,16 +970,23 @@ app.whenReady().then(() => {
     }
   });
 
-  createWindow();
+  // 恢复上次的模式：经典 / 极简直接打开主窗口，迷你则隐藏主窗口只显示迷你窗
+  appState = loadAppState();
+  currentMode = appState.mode;
+  createWindow(appState.mainMode);
+  if (currentMode === 'mini') {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+    createMiniWindow();
+  }
   startMonitor();
-  bootLog(`whenReady 完成 isDev=${isDev}`);
+  bootLog(`whenReady 完成 isDev=${isDev} mode=${currentMode}`);
 
   process.on('uncaughtException', (err) => {
     bootLog(`未捕获异常: ${err && err.stack ? err.stack.split('\n')[0] : err}`);
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow(appState.mainMode);
   });
 });
 

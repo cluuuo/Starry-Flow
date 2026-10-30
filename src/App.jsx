@@ -6,6 +6,7 @@ import FocusPanel from './components/FocusPanel';
 import StatsBar from './components/StatsBar';
 import SettingsWindow from './components/SettingsWindow';
 import MarkPanel from './components/MarkPanel';
+import Toast from './components/Toast';
 import {
   DEFAULT_SETTINGS,
   mergeSettings,
@@ -52,6 +53,7 @@ export default function App() {
   const [activeDay, setActiveDay] = useState(null);
   const [maximized, setMaximized] = useState(false);
   const [storageInfo, setStorageInfo] = useState(null);
+  const [windowMode, setWindowMode] = useState('classic');
   const pendingCommandRef = useRef(null);
 
   const todayKey = logicalDateKey(new Date(), settings.dayStartMinutes);
@@ -69,6 +71,25 @@ export default function App() {
     if (!api || !api.onWindowMaximized) return undefined;
     api.isWindowMaximized().then((v) => setMaximized(!!v)).catch(() => {});
     return api.onWindowMaximized((v) => setMaximized(!!v));
+  }, []);
+
+  // 显示模式：经典 / 极简（迷你模式由独立窗口渲染）
+  useEffect(() => {
+    const api = window.api;
+    if (!api || !api.getWindowMode) return undefined;
+    api.getWindowMode().then((mode) => {
+      if (mode === 'classic' || mode === 'compact') setWindowMode(mode);
+    }).catch(() => {});
+    if (!api.onWindowMode) return undefined;
+    return api.onWindowMode((mode) => {
+      if (mode === 'classic' || mode === 'compact') setWindowMode(mode);
+    });
+  }, []);
+
+  const switchWindowMode = useCallback(async (mode) => {
+    if (!window.api || !window.api.setWindowMode) return;
+    const next = await window.api.setWindowMode(mode);
+    if (next === 'classic' || next === 'compact') setWindowMode(next);
   }, []);
 
   // 初始加载
@@ -218,10 +239,10 @@ export default function App() {
     return () => clearInterval(timer);
   }, [settings.dayStartMinutes]);
 
-  // 提示条 6 秒后自动收起
+  // 提示条 3 秒后自动收起（底部 toast 的淡出由 CSS 动画完成）
   useEffect(() => {
     if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 6000);
+    const timer = setTimeout(() => setNotice(null), 3600);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -388,7 +409,7 @@ export default function App() {
 
   return (
     <div
-      className="app"
+      className={`app${windowMode === 'compact' ? ' mode-compact' : ''}`}
       style={{
         '--accent': settings.starColor,
         '--tier-1': titleTiers[0],
@@ -410,9 +431,27 @@ export default function App() {
         </div>
         <div className="header-right">
           {demoMode && <span className="demo-tag">示例数据</span>}
-          <button className="settings-btn" onClick={() => setDrawerOpen(true)}>
-            ⚙ 设置
-          </button>
+          {windowMode !== 'compact' && (
+            <button className="settings-btn" onClick={() => setDrawerOpen(true)}>
+              ⚙ 设置
+            </button>
+          )}
+          {window.api && (
+            <>
+              {windowMode === 'compact' ? (
+                <button className="mode-btn" onClick={() => switchWindowMode('classic')}>
+                  经典模式
+                </button>
+              ) : (
+                <button className="mode-btn" onClick={() => switchWindowMode('compact')}>
+                  极简模式
+                </button>
+              )}
+              <button className="mode-btn" onClick={() => switchWindowMode('mini')}>
+                迷你模式
+              </button>
+            </>
+          )}
           {window.api && (
             <div className="win-controls">
               <button
@@ -462,11 +501,18 @@ export default function App() {
         todayPoints={todayPoints}
         tiers={settings.tiers}
         starColor={settings.starColor}
-        notice={notice}
         connected={!!focus}
         onCommand={sendFocusCommand}
+        motion={settings.starMotion}
+        sky={{
+          density: settings.sky.density,
+          duration: skyDuration,
+          animated: settings.sky.animated !== false
+        }}
+        variant={windowMode === 'compact' ? 'compact' : 'classic'}
       />
 
+      {windowMode !== 'compact' && (
       <div className="card star-card">
         <SkyBackdrop
           density={settings.sky.density}
@@ -528,13 +574,16 @@ export default function App() {
           </div>
         )}
       </div>
+      )}
 
+      {windowMode !== 'compact' && (
       <StatsBar
         days={scopedDays}
         todayKey={todayKey}
         dayStartMinutes={settings.dayStartMinutes}
         tiers={settings.tiers}
       />
+      )}
 
       <SettingsWindow
         open={drawerOpen}
@@ -568,6 +617,8 @@ export default function App() {
           readImage={readMarkImage}
         />
       )}
+
+      <Toast notice={notice} />
     </div>
   );
 }
