@@ -22,8 +22,6 @@ export default function SettingsWindow({
   settings,
   onChange,
   onClose,
-  onRestart,
-  startDateKey,
   focus,
   onFocusCommand,
   onBackupExport,
@@ -726,15 +724,6 @@ export default function SettingsWindow({
                 )}
               </div>
 
-              <div className="settings-section">
-                <div className="settings-title">新的旅程</div>
-                <p className="settings-desc">
-                  起始日：{startDateKey || '今天'}。重新开始会把起始日设为今天，星图回到最初的两颗星。
-                </p>
-                <button className="settings-action" onClick={onRestart}>
-                  从今天重新开始
-                </button>
-              </div>
             </div>
           )}
         </div>

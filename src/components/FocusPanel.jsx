@@ -179,16 +179,19 @@ export default function FocusPanel({ focus, todayPoints, tiers, starColor, notic
 
         <div className="focus-strict">
           <span className="focus-strict-label">严格模式</span>
+          <span className="focus-strict-hint">
+            {strict?.enabled ? '离开进程会持续扣除积分' : '离开进程不会扣除积分'}
+          </span>
           <button
             className={`switch ${strict?.enabled ? 'on' : ''}`}
             disabled={!connected || !strict}
+            role="switch"
+            aria-checked={!!strict?.enabled}
+            aria-label="严格模式"
             onClick={toggleStrict}
           >
             <span className="switch-knob" />
           </button>
-          <span className="focus-strict-hint">
-            {strict?.enabled ? `离开扣 ${strict.punish_points} 分` : '离开不扣分'}
-          </span>
         </div>
       </div>
 

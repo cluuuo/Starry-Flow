@@ -300,13 +300,6 @@ export default function App() {
     return res;
   }, []);
 
-  const handleRestart = useCallback(() => {
-    const next = { ...settings, startDate: todayKey };
-    setSettings(next);
-    setStartDateKey(todayKey);
-    if (window.api) window.api.setSettings(next);
-  }, [settings, todayKey]);
-
   // 仅示例模式：跳转到旅程第 N 天，便于查验各阶段解锁效果
   const jumpToDemoDay = useCallback((n) => {
     const demoStart = toDateKey(addDays(parseDateKey(todayKey), -(n - 1)));
@@ -464,8 +457,6 @@ export default function App() {
         settings={settings}
         onChange={handleSettingsChange}
         onClose={() => setDrawerOpen(false)}
-        onRestart={handleRestart}
-        startDateKey={startDateKey}
         focus={focus}
         onFocusCommand={sendFocusCommand}
         onBackupExport={handleBackupExport}

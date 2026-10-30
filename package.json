@@ -1,7 +1,7 @@
 {
   "name": "starry-flow",
   "productName": "Starry Flow",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Starry Flow 星流 · 专注贡献可视化",
   "main": "electron/main.js",
   "scripts": {
@@ -50,11 +50,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

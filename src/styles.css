@@ -280,6 +280,8 @@ body::before {
 
 /* ---------- 专注面板 ---------- */
 .focus-panel {
+  /* 「开始专注」与「每日结算」共用的高度标尺，保证两个按钮严格等高 */
+  --focus-btn-h: 44px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -414,7 +416,29 @@ body::before {
 .focus-strict-hint {
   font-size: 11px;
   color: var(--text-faint);
-  min-width: 72px;
+  min-width: 122px;
+  text-align: right;
+  white-space: nowrap;
+  transition: color 0.26s ease;
+}
+
+/* 严格模式开关：整体尺寸与「更换进程」按钮一致（78×34），滑块为圆角正方形 */
+.focus-strict .switch {
+  width: 78px;
+  height: 34px;
+  border-radius: 12px;
+}
+
+.focus-strict .switch-knob {
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+}
+
+.focus-strict .switch.on .switch-knob {
+  left: 48px;
 }
 
 .process-letter {
@@ -665,7 +689,7 @@ body::before {
   transition: color 0.3s;
 }
 
-/* 严格模式：数字背后自右向左划过的流星 */
+/* 严格模式：数字背后自左向右划过的流星 */
 .meteor-strip {
   position: absolute;
   inset: -8px -16px;
@@ -677,8 +701,9 @@ body::before {
 
 .meteor-shot {
   position: absolute;
-  right: -60px;
+  left: -60px;
   display: flex;
+  flex-direction: row-reverse;
   align-items: center;
   opacity: 0;
   animation-name: meteor-sweep;
@@ -700,9 +725,9 @@ body::before {
 
 .meteor-shot-tail {
   height: 2.4px;
-  margin-left: -1px;
+  margin-right: -1px;
   border-radius: 2px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 80%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 80%, transparent));
   filter: blur(0.3px);
 }
 
@@ -710,7 +735,7 @@ body::before {
   0% { transform: translateX(0); opacity: 0; }
   12% { opacity: 1; }
   70% { opacity: 0.55; }
-  100% { transform: translateX(calc(-100cqw - 100%)); opacity: 0; }
+  100% { transform: translateX(calc(100cqw + 100%)); opacity: 0; }
 }
 
 .focus-sub {
@@ -791,7 +816,12 @@ body::before {
 }
 
 .focus-main-btn {
-  padding: 11px 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: var(--focus-btn-h);
+  padding: 0 28px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -799,6 +829,7 @@ body::before {
   font-family: inherit;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -832,13 +863,20 @@ body::before {
 }
 
 .focus-sub-btn {
-  padding: 11px 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: var(--focus-btn-h);
+  padding: 0 28px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-dim);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -2138,14 +2176,15 @@ body::before {
 /* 开关 */
 .switch {
   position: relative;
+  flex-shrink: 0;
   width: 44px;
   height: 24px;
-  border-radius: 14px;
+  border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--cell-empty);
   cursor: pointer;
   padding: 0;
-  transition: all 0.2s;
+  transition: background 0.26s ease, border-color 0.26s ease, box-shadow 0.26s ease;
 }
 
 .switch-knob {
@@ -2156,23 +2195,37 @@ body::before {
   height: 16px;
   border-radius: 50%;
   background: var(--text-faint);
-  transition: all 0.2s;
+  box-shadow: none;
+  transition: left 0.26s cubic-bezier(0.34, 1.36, 0.64, 1),
+    background 0.26s ease, box-shadow 0.26s ease;
+}
+
+.switch:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
 }
 
 .switch.on {
-  background: rgba(255, 215, 94, 0.18);
-  border-color: rgba(255, 215, 94, 0.55);
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
 .switch.on .switch-knob {
-  left: 22px;
+  left: 23px;
   background: var(--accent);
-  box-shadow: 0 0 8px rgba(255, 215, 94, 0.6);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 90%, transparent),
+    0 0 2px rgba(255, 255, 255, 0.7) inset;
 }
 
 .switch:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .tier-block {
