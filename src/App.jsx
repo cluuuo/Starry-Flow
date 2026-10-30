@@ -51,6 +51,7 @@ export default function App() {
   const [marks, setMarks] = useState({});
   const [activeDay, setActiveDay] = useState(null);
   const [maximized, setMaximized] = useState(false);
+  const [storageInfo, setStorageInfo] = useState(null);
   const pendingCommandRef = useRef(null);
 
   const todayKey = logicalDateKey(new Date(), settings.dayStartMinutes);
@@ -309,6 +310,37 @@ export default function App() {
     return res;
   }, []);
 
+  // 数据存储位置：仅桌面端可用，路径保存在主进程的 storage.json 中
+  const refreshStorageInfo = useCallback(async () => {
+    if (!window.api || !window.api.getStorageInfo) return;
+    try {
+      setStorageInfo(await window.api.getStorageInfo());
+    } catch (e) { /* 忽略 */ }
+  }, []);
+
+  const handleOpenStorage = useCallback((kind) => {
+    if (!window.api || !window.api.openStoragePath) return Promise.resolve({ ok: false, error: '仅桌面端可用' });
+    return window.api.openStoragePath(kind);
+  }, []);
+
+  const handleChooseStorage = useCallback(async (kind) => {
+    if (!window.api || !window.api.chooseStorageDir) return { ok: false, error: '仅桌面端可用' };
+    const res = await window.api.chooseStorageDir(kind);
+    if (res && res.ok && res.info) setStorageInfo(res.info);
+    return res;
+  }, []);
+
+  const handleResetStorage = useCallback(async (kind) => {
+    if (!window.api || !window.api.resetStorageDir) return { ok: false, error: '仅桌面端可用' };
+    const res = await window.api.resetStorageDir(kind);
+    if (res && res.ok && res.info) setStorageInfo(res.info);
+    return res;
+  }, []);
+
+  const handleRestartApp = useCallback(() => {
+    if (window.api && window.api.restartApp) window.api.restartApp();
+  }, []);
+
   // 仅示例模式：跳转到旅程第 N 天，便于查验各阶段解锁效果
   const jumpToDemoDay = useCallback((n) => {
     const demoStart = toDateKey(addDays(parseDateKey(todayKey), -(n - 1)));
@@ -513,6 +545,12 @@ export default function App() {
         onFocusCommand={sendFocusCommand}
         onBackupExport={handleBackupExport}
         onBackupImport={handleBackupImport}
+        storageInfo={storageInfo}
+        onRefreshStorage={refreshStorageInfo}
+        onOpenStorage={handleOpenStorage}
+        onChooseStorage={handleChooseStorage}
+        onResetStorage={handleResetStorage}
+        onRestartApp={handleRestartApp}
       />
 
       {activeDay && (

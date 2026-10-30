@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -33,7 +33,9 @@ function getLocalAppData() {
   }
 }
 
-let DATA_DIR;
+let BASE_DIR;          // 固定配置目录：storage.json / settings.json / 日志
+let STORAGE_FILE;
+let DATA_DIR;          // 专注数据目录（积分、额度、指令队列）
 let SETTINGS_FILE;
 let MONITOR_FILE;
 let FOCUS_FILE;
@@ -42,24 +44,55 @@ let MARKS_FILE;
 let MARKS_DIR;
 let WINDOW_STATE_FILE;
 
+// storage.json 只记录用户改过路径的项，留空即使用默认目录
+function readStorageOptions() {
+  const saved = readJsonSafe(STORAGE_FILE);
+  const pick = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  return {
+    focusDir: saved ? pick(saved.focusDir) : '',
+    marksFileDir: saved ? pick(saved.marksFileDir) : '',
+    marksImageDir: saved ? pick(saved.marksImageDir) : ''
+  };
+}
+
+function resolveStorage(opts) {
+  const focusDir = opts.focusDir || BASE_DIR;
+  const marksFileDir = opts.marksFileDir || BASE_DIR;
+  return {
+    focusDir,
+    focusFile: path.join(focusDir, 'focus-data.json'),
+    monitorFile: path.join(focusDir, 'monitor-data.json'),
+    commandDir: path.join(focusDir, 'focus-commands'),
+    marksFile: path.join(marksFileDir, 'marks.json'),
+    marksImageDir: opts.marksImageDir || path.join(BASE_DIR, 'marks')
+  };
+}
+
+// 把解析结果写入全局变量，运行期一律读这些变量
+function applyStorage(resolved) {
+  DATA_DIR = resolved.focusDir;
+  FOCUS_FILE = resolved.focusFile;
+  MONITOR_FILE = resolved.monitorFile;
+  COMMAND_DIR = resolved.commandDir;
+  MARKS_FILE = resolved.marksFile;
+  MARKS_DIR = resolved.marksImageDir;
+}
+
 function initPaths() {
-  DATA_DIR = path.join(getLocalAppData(), 'StarryFlow');
-  SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-  MONITOR_FILE = path.join(DATA_DIR, 'monitor-data.json');
-  FOCUS_FILE = path.join(DATA_DIR, 'focus-data.json');
-  COMMAND_DIR = path.join(DATA_DIR, 'focus-commands');
-  MARKS_FILE = path.join(DATA_DIR, 'marks.json');
-  MARKS_DIR = path.join(DATA_DIR, 'marks');
-  WINDOW_STATE_FILE = path.join(DATA_DIR, 'window-state.json');
-  console.log('[main] DATA_DIR =', DATA_DIR);
+  BASE_DIR = path.join(getLocalAppData(), 'StarryFlow');
+  STORAGE_FILE = path.join(BASE_DIR, 'storage.json');
+  SETTINGS_FILE = path.join(BASE_DIR, 'settings.json');
+  WINDOW_STATE_FILE = path.join(BASE_DIR, 'window-state.json');
+  applyStorage(resolveStorage(readStorageOptions()));
+  console.log('[main] BASE_DIR =', BASE_DIR, '| DATA_DIR =', DATA_DIR);
 }
 
 function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  console.log('[main] DATA_DIR exists =', fs.existsSync(DATA_DIR));
+  [BASE_DIR, DATA_DIR, MARKS_DIR].filter(Boolean).forEach((dir) => {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  });
 }
+
 
 function readJsonSafe(file) {
   try {
@@ -74,7 +107,7 @@ function readJsonSafe(file) {
 
 function writeJsonSafe(file, obj) {
   try {
-    ensureDataDir();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${Date.now()}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf-8');
     fs.renameSync(tmp, file);
@@ -110,9 +143,10 @@ function removeMarkImage(name) {
 let monitorProc = null;
 
 function bootLog(message) {
+  if (!BASE_DIR) return;
   try {
     const line = `[${new Date().toISOString()}] ${message}\n`;
-    fs.appendFileSync(path.join(DATA_DIR, 'boot.log'), line, 'utf-8');
+    fs.appendFileSync(path.join(BASE_DIR, 'boot.log'), line, 'utf-8');
   } catch (e) { /* 忽略 */ }
 }
 
@@ -165,7 +199,13 @@ function startMonitor() {
       cwd: isDev ? projectRoot : process.resourcesPath,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, STARRY_FLOW_SELF_PID: String(process.pid) }
+      env: {
+        ...process.env,
+        STARRY_FLOW_SELF_PID: String(process.pid),
+        // 数据目录可能被用户改到别处，采集端必须跟随同一份路径
+        STARRY_FLOW_FOCUS_DIR: DATA_DIR,
+        STARRY_FLOW_SETTINGS_FILE: SETTINGS_FILE
+      }
     });
 
     proc.stdout.on('data', (d) => console.log('[monitor]', String(d).trim()));
@@ -466,6 +506,167 @@ app.whenReady().then(() => {
       iconCache.set(exePath, null);
       return null;
     }
+  });
+
+  // ---------- 数据存储位置 ----------
+  // Windows 路径大小写不敏感，比较前统一小写，避免用户只是大小写不同就触发重启提示
+  const samePath = (a, b) => path.resolve(String(a)).toLowerCase() === path.resolve(String(b)).toLowerCase();
+
+  const copyFileIfMissing = (src, dest) => {
+    if (!fs.existsSync(src) || fs.existsSync(dest)) return false;
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    return true;
+  };
+
+  // 逐个文件复制，不覆盖目标目录里已有的同名文件
+  const copyDirInto = (srcDir, destDir) => {
+    if (!fs.existsSync(srcDir)) return false;
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.readdirSync(srcDir).forEach((name) => {
+      const src = path.join(srcDir, name);
+      const dest = path.join(destDir, name);
+      if (fs.existsSync(dest)) return;
+      if (fs.statSync(src).isDirectory()) fs.cpSync(src, dest, { recursive: true });
+      else fs.copyFileSync(src, dest);
+    });
+    return true;
+  };
+
+  const storageInfo = () => {
+    const opts = readStorageOptions();
+    const target = resolveStorage(opts);
+    const restartRequired =
+      !samePath(target.focusDir, DATA_DIR) ||
+      !samePath(target.marksFile, MARKS_FILE) ||
+      !samePath(target.marksImageDir, MARKS_DIR);
+    return {
+      baseDir: BASE_DIR,
+      focusFile: target.focusFile,
+      marksFile: target.marksFile,
+      marksImageDir: target.marksImageDir,
+      defaults: {
+        focusFile: path.join(BASE_DIR, 'focus-data.json'),
+        marksFile: path.join(BASE_DIR, 'marks.json'),
+        marksImageDir: path.join(BASE_DIR, 'marks')
+      },
+      isCustom: {
+        focus: Boolean(opts.focusDir),
+        marksText: Boolean(opts.marksFileDir),
+        marksImage: Boolean(opts.marksImageDir)
+      },
+      restartRequired
+    };
+  };
+
+  ipcMain.handle('storage:get', () => storageInfo());
+
+  // 打开界面上展示的路径：文件在资源管理器里定位，文件夹直接打开
+  ipcMain.handle('storage:open', async (_event, kind) => {
+    try {
+      const target = resolveStorage(readStorageOptions());
+      const item = {
+        focus: target.focusFile,
+        marksText: target.marksFile,
+        marksImage: target.marksImageDir
+      }[kind];
+      if (!item) return { ok: false, error: '未知的数据类型' };
+
+      if (kind === 'marksImage') {
+        // 目录可能刚改过还没重启，先确保存在再打开
+        fs.mkdirSync(item, { recursive: true });
+        const err = await shell.openPath(item);
+        return err ? { ok: false, error: err } : { ok: true };
+      }
+      if (fs.existsSync(item)) {
+        shell.showItemInFolder(item);
+        return { ok: true };
+      }
+      const dir = path.dirname(item);
+      fs.mkdirSync(dir, { recursive: true });
+      const err = await shell.openPath(dir);
+      return err ? { ok: false, error: err } : { ok: true };
+    } catch (e) {
+      console.error('打开数据路径失败:', e);
+      return { ok: false, error: String(e) };
+    }
+  });
+
+  ipcMain.handle('storage:choose', async (_event, kind) => {
+    const titles = {
+      focus: '选择积分与额度的存放文件夹',
+      marksText: '选择印痕文字的存放文件夹',
+      marksImage: '选择印痕图片的存放文件夹'
+    };
+    if (!titles[kind]) return { ok: false, error: '未知的数据类型' };
+    const res = await dialog.showOpenDialog({
+      title: titles[kind],
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (res.canceled || !res.filePaths || !res.filePaths.length) {
+      return { ok: false, canceled: true };
+    }
+    const dir = res.filePaths[0];
+    try {
+      const opts = readStorageOptions();
+      if (kind === 'focus') {
+        // 换目录时把现有数据带过去，避免用户切换到新位置后看到空白数据
+        if (!samePath(dir, DATA_DIR)) {
+          copyFileIfMissing(FOCUS_FILE, path.join(dir, 'focus-data.json'));
+          copyFileIfMissing(MONITOR_FILE, path.join(dir, 'monitor-data.json'));
+          copyDirInto(COMMAND_DIR, path.join(dir, 'focus-commands'));
+        }
+        opts.focusDir = dir;
+      } else if (kind === 'marksText') {
+        if (!samePath(dir, path.dirname(MARKS_FILE))) {
+          copyFileIfMissing(MARKS_FILE, path.join(dir, 'marks.json'));
+        }
+        opts.marksFileDir = dir;
+      } else {
+        if (!samePath(dir, MARKS_DIR)) copyDirInto(MARKS_DIR, dir);
+        opts.marksImageDir = dir;
+      }
+      if (!writeJsonSafe(STORAGE_FILE, opts)) return { ok: false, error: '写入路径配置失败' };
+      return { ok: true, info: storageInfo() };
+    } catch (e) {
+      console.error('更改数据位置失败:', e);
+      return { ok: false, error: String(e) };
+    }
+  });
+
+  ipcMain.handle('storage:reset', (_event, kind) => {
+    try {
+      const opts = readStorageOptions();
+      if (kind === 'focus') {
+        if (!samePath(DATA_DIR, BASE_DIR)) {
+          copyFileIfMissing(FOCUS_FILE, path.join(BASE_DIR, 'focus-data.json'));
+          copyFileIfMissing(MONITOR_FILE, path.join(BASE_DIR, 'monitor-data.json'));
+          copyDirInto(COMMAND_DIR, path.join(BASE_DIR, 'focus-commands'));
+        }
+        opts.focusDir = '';
+      } else if (kind === 'marksText') {
+        const defFile = path.join(BASE_DIR, 'marks.json');
+        if (!samePath(MARKS_FILE, defFile)) copyFileIfMissing(MARKS_FILE, defFile);
+        opts.marksFileDir = '';
+      } else if (kind === 'marksImage') {
+        const defDir = path.join(BASE_DIR, 'marks');
+        if (!samePath(MARKS_DIR, defDir)) copyDirInto(MARKS_DIR, defDir);
+        opts.marksImageDir = '';
+      } else {
+        return { ok: false, error: '未知的数据类型' };
+      }
+      if (!writeJsonSafe(STORAGE_FILE, opts)) return { ok: false, error: '写入路径配置失败' };
+      return { ok: true, info: storageInfo() };
+    } catch (e) {
+      console.error('恢复默认数据位置失败:', e);
+      return { ok: false, error: String(e) };
+    }
+  });
+
+  ipcMain.on('app:restart', () => {
+    stopMonitor();
+    app.relaunch();
+    app.exit(0);
   });
 
   ipcMain.handle('backup:export', async () => {

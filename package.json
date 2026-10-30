@@ -1,7 +1,7 @@
 {
   "name": "starry-flow",
   "productName": "Starry Flow",
-  "version": "2.6.3",
+  "version": "2.7.0",
   "description": "Starry Flow 星流 · 专注目标与进度可视化",
   "main": "electron/main.js",
   "scripts": {

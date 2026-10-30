@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { minutesToTimeStr, timeStrToMinutes, DEFAULT_SETTINGS, tierBrightness, tierGlow, tierHex, hsvToHex } from '../lib/logic';
 
 const SHAPES = [
@@ -25,21 +25,95 @@ export default function SettingsWindow({
   focus,
   onFocusCommand,
   onBackupExport,
-  onBackupImport
+  onBackupImport,
+  storageInfo,
+  onRefreshStorage,
+  onOpenStorage,
+  onChooseStorage,
+  onResetStorage,
+  onRestartApp
 }) {
-  const [tab, setTab] = useState(() => (settings.settingsTab === 'rules' ? 'rules' : 'appearance'));
+  const [tab, setTab] = useState(() => {
+    const saved = settings.settingsTab;
+    return saved === 'rules' || saved === 'backup' ? saved : 'appearance';
+  });
   const [exchangeAmount, setExchangeAmount] = useState(1);
   const [spendAmount, setSpendAmount] = useState(1);
   const [backupMsg, setBackupMsg] = useState(null);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [storageBusy, setStorageBusy] = useState(null);
+  const [storageMsg, setStorageMsg] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [debugUnlocked, setDebugUnlocked] = useState(false);
   const [pointsDelta, setPointsDelta] = useState('');
   const [allowanceDelta, setAllowanceDelta] = useState('');
 
+  // 窗口高度跟随当前页内容：切换标签时用 CSS 过渡平滑改变，避免突然跳尺寸
+  const winRef = useRef(null);
+  const pageRef = useRef(null);
+  const firstMeasureRef = useRef(true);
+  const [winHeight, setWinHeight] = useState(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      firstMeasureRef.current = true;
+      setWinHeight(null);
+      return undefined;
+    }
+    const win = winRef.current;
+    const page = pageRef.current;
+    if (!win || !page) return undefined;
+
+    const measure = () => {
+      const head = win.querySelector('.settings-head');
+      const tabs = win.querySelector('.settings-tabs');
+      const foot = win.querySelector('.settings-foot');
+      const body = win.querySelector('.settings-body');
+      if (!head || !tabs || !foot || !body) return;
+      const cs = getComputedStyle(body);
+      const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const chrome = head.offsetHeight + tabs.offsetHeight + foot.offsetHeight + pad;
+      const maxHeight = Math.round(window.innerHeight * 0.86);
+      const next = Math.min(Math.round(chrome + page.offsetHeight), maxHeight);
+      if (firstMeasureRef.current) {
+        // 首次打开直接落到目标高度，只有切换标签才播放过渡
+        win.style.transition = 'none';
+        setWinHeight(next);
+        requestAnimationFrame(() => {
+          win.style.transition = '';
+          firstMeasureRef.current = false;
+        });
+      } else {
+        setWinHeight(next);
+      }
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(page);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [open, tab]);
+
+  // 打开「备份与恢复」时重新读一次路径，避免显示切换前缓存的旧值
+  useEffect(() => {
+    if (open && tab === 'backup' && onRefreshStorage) onRefreshStorage();
+  }, [open, tab, onRefreshStorage]);
+
   if (!open) return null;
 
   const update = (patch) => onChange({ ...settings, ...patch });
+
+  const switchTab = (next) => {
+    setTab(next);
+    update({ settingsTab: next });
+    // 切换页面后回到顶部，避免停在上一个页面滚动到的位置
+    const body = winRef.current && winRef.current.querySelector('.settings-body');
+    if (body) body.scrollTop = 0;
+  };
 
   const resetKeys = (keys) => {
     const patch = {};
@@ -122,13 +196,49 @@ export default function SettingsWindow({
     update({ tiers });
   };
 
+  // 数据位置：选择后先把现有数据复制过去，重启应用才真正切换
+  const handleOpenStorage = async (kind) => {
+    if (!onOpenStorage) return;
+    const res = await onOpenStorage(kind);
+    if (res && res.ok === false && !res.canceled) {
+      setStorageMsg({ ok: false, text: res.error || '无法打开该路径' });
+    }
+  };
+
+  const handleChooseStorage = async (kind) => {
+    if (!onChooseStorage || storageBusy) return;
+    setStorageBusy(kind);
+    const res = await onChooseStorage(kind);
+    setStorageBusy(null);
+    if (res?.canceled) return;
+    setStorageMsg(res?.ok
+      ? { ok: true, text: '路径已更新，现有数据已复制到新位置，重启应用后生效。' }
+      : { ok: false, text: res?.error || '更改路径失败' });
+  };
+
+  const handleResetStorage = async (kind) => {
+    if (!onResetStorage || storageBusy) return;
+    setStorageBusy(kind);
+    const res = await onResetStorage(kind);
+    setStorageBusy(null);
+    if (res?.canceled) return;
+    setStorageMsg(res?.ok
+      ? { ok: true, text: '已恢复默认位置，数据已复制回默认目录，重启应用后生效。' }
+      : { ok: false, text: res?.error || '恢复默认失败' });
+  };
+
   const updateMotion = (patch) => update({ starMotion: { ...settings.starMotion, ...patch } });
   const updateOrbit = (patch) => update({ orbit: { ...settings.orbit, ...patch } });
   const updateSky = (patch) => update({ sky: { ...settings.sky, ...patch } });
 
   return (
     <div className="settings-mask" onClick={onClose}>
-      <div className="settings-window" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="settings-window"
+        ref={winRef}
+        style={winHeight ? { height: `${winHeight}px` } : undefined}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="settings-head">
           <span>设置</span>
           <button className="settings-close" onClick={onClose}>×</button>
@@ -137,25 +247,26 @@ export default function SettingsWindow({
         <div className="settings-tabs">
           <button
             className={`settings-tab ${tab === 'appearance' ? 'on' : ''}`}
-            onClick={() => {
-              setTab('appearance');
-              update({ settingsTab: 'appearance' });
-            }}
+            onClick={() => switchTab('appearance')}
           >
             外观设置
           </button>
           <button
             className={`settings-tab ${tab === 'rules' ? 'on' : ''}`}
-            onClick={() => {
-              setTab('rules');
-              update({ settingsTab: 'rules' });
-            }}
+            onClick={() => switchTab('rules')}
           >
             规则设置
+          </button>
+          <button
+            className={`settings-tab ${tab === 'backup' ? 'on' : ''}`}
+            onClick={() => switchTab('backup')}
+          >
+            备份与恢复
           </button>
         </div>
 
         <div className="settings-body">
+          <div className="settings-page" ref={pageRef}>
           {tab === 'appearance' && (
             <div className="settings-grid">
               <div className="settings-section">
@@ -689,24 +800,6 @@ export default function SettingsWindow({
               </div>
 
               <div className="settings-section">
-                <div className="settings-title">备份与恢复</div>
-                <p className="settings-desc">
-                  备份包含专注数据、积分历史、规则与界面设置。导入会整体替换，印痕图片不包含在备份内。
-                </p>
-                <div className="backup-buttons">
-                  <button className="settings-action" disabled={backupBusy} onClick={handleExport}>
-                    导出备份
-                  </button>
-                  <button className="settings-action" disabled={backupBusy} onClick={handleImport}>
-                    导入备份
-                  </button>
-                </div>
-                {backupMsg && (
-                  <div className={`backup-msg ${backupMsg.ok ? 'ok' : 'fail'}`}>{backupMsg.text}</div>
-                )}
-              </div>
-
-              <div className="settings-section">
                 <div className="settings-title">数据调试</div>
                 <p className="settings-desc">
                   用于旧数据首次迁移，或因意外导致积分、额度丢失后的补录。输入正数增加、负数减少，操作会立即写入当前总数据。
@@ -774,6 +867,116 @@ export default function SettingsWindow({
 
             </div>
           )}
+
+          {tab === 'backup' && (
+            <div className="settings-grid">
+              <div className="settings-section settings-wide">
+                <div className="settings-title">数据存储位置</div>
+                <p className="settings-desc">
+                  积分、额度与印痕默认存放在系统应用数据目录。可以改到其他磁盘或同步文件夹，更改时会把现有数据复制过去；新位置在重启应用后生效。
+                </p>
+
+                {!storageInfo ? (
+                  <div className="storage-empty">正在读取路径…</div>
+                ) : (
+                  <>
+                    <div className="storage-list">
+                      {[
+                        {
+                          kind: 'focus',
+                          name: `积分与${allowanceName}`,
+                          file: 'focus-data.json',
+                          value: storageInfo.focusFile,
+                          custom: storageInfo.isCustom?.focus
+                        },
+                        {
+                          kind: 'marksText',
+                          name: '印痕文字',
+                          file: 'marks.json',
+                          value: storageInfo.marksFile,
+                          custom: storageInfo.isCustom?.marksText
+                        },
+                        {
+                          kind: 'marksImage',
+                          name: '印痕图片',
+                          file: '图片文件夹',
+                          value: storageInfo.marksImageDir,
+                          custom: storageInfo.isCustom?.marksImage
+                        }
+                      ].map((item) => (
+                        <div className="storage-row" key={item.kind}>
+                          <div className="storage-main">
+                            <div className="storage-name">
+                              {item.name}
+                              <span className="storage-file">{item.file}</span>
+                              {item.custom && <span className="storage-tag">自定义</span>}
+                            </div>
+                            <div className="storage-path" title={item.value}>{item.value}</div>
+                          </div>
+                          <div className="storage-actions">
+                            <button
+                              className="settings-action settings-action-inline storage-open"
+                              onClick={() => handleOpenStorage(item.kind)}
+                            >
+                              打开路径
+                            </button>
+                            <button
+                              className="settings-action settings-action-inline"
+                              disabled={storageBusy === item.kind}
+                              onClick={() => handleChooseStorage(item.kind)}
+                            >
+                              更改位置
+                            </button>
+                            {item.custom && (
+                              <button
+                                className="storage-reset"
+                                disabled={storageBusy === item.kind}
+                                onClick={() => handleResetStorage(item.kind)}
+                              >
+                                恢复默认
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {storageInfo.restartRequired && (
+                      <div className="storage-restart">
+                        <span>存储位置已更改，重启应用后生效。</span>
+                        <button className="settings-action settings-action-inline" onClick={onRestartApp}>
+                          立即重启
+                        </button>
+                      </div>
+                    )}
+
+                    {storageMsg && (
+                      <div className={`backup-msg ${storageMsg.ok ? 'ok' : 'fail'}`}>{storageMsg.text}</div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="settings-section settings-wide">
+                <div className="settings-title">备份与恢复</div>
+                <p className="settings-desc">
+                  备份包含专注数据、积分历史、规则与界面设置。导入会整体替换当前数据，印痕图片不包含在备份内，需要另行复制图片文件夹。
+                </p>
+                <div className="backup-buttons">
+                  <button className="settings-action" disabled={backupBusy} onClick={handleExport}>
+                    导出备份
+                  </button>
+                  <button className="settings-action" disabled={backupBusy} onClick={handleImport}>
+                    导入备份
+                  </button>
+                </div>
+                {backupMsg && (
+                  <div className={`backup-msg ${backupMsg.ok ? 'ok' : 'fail'}`}>{backupMsg.text}</div>
+                )}
+              </div>
+            </div>
+          )}
+          </div>
         </div>
 
         <div className="settings-foot">

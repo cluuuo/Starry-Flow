@@ -18,10 +18,12 @@ import win32event
 import win32api
 import win32process
 
-DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "StarryFlow")
+# 默认放在 LocalAppData，主进程可通过环境变量把数据目录改到用户指定的位置
+BASE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "StarryFlow")
+DATA_DIR = os.environ.get("STARRY_FLOW_FOCUS_DIR") or BASE_DIR
 FOCUS_FILE = os.path.join(DATA_DIR, "focus-data.json")
 COMMAND_DIR = os.path.join(DATA_DIR, "focus-commands")
-SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+SETTINGS_FILE = os.environ.get("STARRY_FLOW_SETTINGS_FILE") or os.path.join(BASE_DIR, "settings.json")
 LEGACY_MONITOR_FILE = os.path.join(DATA_DIR, "monitor-data.json")
 MUTEX_NAME = "StarryFlowFocusMonitor"
 SELF_PID = os.environ.get("STARRY_FLOW_SELF_PID")
@@ -84,8 +86,9 @@ def load_json(path):
 
 
 def atomic_write(path, obj):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=DATA_DIR, prefix=".tmp-", suffix=".json")
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".tmp-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2)

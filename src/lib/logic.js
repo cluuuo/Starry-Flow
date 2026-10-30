@@ -145,7 +145,7 @@ export function mergeSettings(saved) {
     : (Number.isFinite(rawDuration) ? durationToLevel(rawDuration) : base.sky.flowSpeed);
   delete out.sky.baseDuration;
   out.background = { ...base.background, ...(saved.background || {}) };
-  out.settingsTab = saved.settingsTab === 'rules' ? 'rules' : 'appearance';
+  out.settingsTab = ['rules', 'backup'].includes(saved.settingsTab) ? saved.settingsTab : 'appearance';
 
   if (Array.isArray(saved.tiers) && saved.tiers.length) {
     out.tiers = saved.tiers.map((t, i) => ({
