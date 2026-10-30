@@ -282,9 +282,10 @@ function createWindow() {
     height: state.height,
     minWidth: 1100,
     minHeight: 760,
-    backgroundColor: '#0d1117',
+    backgroundColor: '#060e24',
     title: 'Starry Flow 星流',
     icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
+    frame: false,              // 自绘沉浸式标题栏，标题栏按钮由渲染层绘制
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -303,6 +304,12 @@ function createWindow() {
   };
   win.on('resize', rememberState);
   win.on('move', rememberState);
+  // 自绘按钮需要知道当前是否已最大化，用于切换「最大化 / 还原」图标
+  const notifyMaximized = () => {
+    if (!win.isDestroyed()) win.webContents.send('window:maximized', win.isMaximized());
+  };
+  win.on('maximize', notifyMaximized);
+  win.on('unmaximize', notifyMaximized);
   win.on('close', () => {
     clearTimeout(windowStateTimer);
     saveWindowState(win);
@@ -336,6 +343,22 @@ app.whenReady().then(() => {
 
   ipcMain.handle('settings:get', () => {
     return readJsonSafe(SETTINGS_FILE);
+  });
+
+  // 自绘标题栏：最小化 / 最大化还原 / 关闭
+  ipcMain.on('window:control', (event, action) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    if (action === 'minimize') win.minimize();
+    else if (action === 'maximize') {
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+    } else if (action === 'close') win.close();
+  });
+
+  ipcMain.handle('window:is-maximized', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return win ? win.isMaximized() : false;
   });
 
   ipcMain.handle('settings:set', (_event, settings) => {

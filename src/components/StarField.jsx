@@ -40,13 +40,11 @@ const TAIL_SPAN = 1.55; // 尾迹覆盖的弧度
 const TAIL_SEGS = 20; // 亮芯分段数
 const HALO_SEGS = 10; // 光晕分段数
 
-function OrbitTrail({ period, animate, dateKey, motion }) {
+function OrbitTrail({ period, animate }) {
   const headRef = useRef(null);
   const tailRef = useRef(null);
   const coreRefs = useRef([]);
   const haloRefs = useRef([]);
-  // 与星点本体共用同一份漂浮参数，光点/卫星始终跟着星点一起移动
-  const motionStyle = useMemo(() => starMotionStyle(dateKey, motion), [dateKey, motion]);
 
   useEffect(() => {
     const cx = 50;
@@ -101,7 +99,7 @@ function OrbitTrail({ period, animate, dateKey, motion }) {
 
   if (!animate) {
     return (
-      <span className="orbit-wrap" style={motionStyle} aria-hidden="true">
+      <span className="orbit-wrap" aria-hidden="true">
         <svg viewBox="0 0 100 100" className="orbit-svg is-fixed">
           <circle className="orbit-head" cx="76" cy="76" r="4.2" />
         </svg>
@@ -110,7 +108,7 @@ function OrbitTrail({ period, animate, dateKey, motion }) {
   }
 
   return (
-    <span className="orbit-wrap" style={motionStyle} aria-hidden="true">
+    <span className="orbit-wrap" aria-hidden="true">
       <svg viewBox="0 0 100 100" className="orbit-svg">
         {Array.from({ length: HALO_SEGS }).map((_, i) => {
           const f = i / (HALO_SEGS - 1);
@@ -195,7 +193,7 @@ function starMotionStyle(dateKey, motion) {
 }
 
 // 单颗星点
-function Star({ dateKey, points, tiers, isToday, isFuture, shape, color, motion }) {
+function Star({ dateKey, points, tiers, isToday, isFuture, shape, color, motion, children }) {
   const level = tierIndex(points, tiers);
   const lit = level >= 0;
   const tier = level >= 0 ? tiers[level] : null;
@@ -220,12 +218,12 @@ function Star({ dateKey, points, tiers, isToday, isFuture, shape, color, motion 
   return (
     <div
       className={`star shape-${shape} ${isToday ? 'is-today' : ''} ${isFuture ? 'is-future' : ''} ${lit ? 'is-lit' : ''}`}
-      style={{ ...motionStyle, ...glowStyle }}
+      style={motionStyle}
     >
       <svg
         viewBox="0 0 100 100"
         className="star-svg"
-        style={{ color: lit ? fillColor : 'rgba(178, 205, 255, 0.62)' }}
+        style={{ color: lit ? fillColor : 'rgba(178, 205, 255, 0.62)', ...glowStyle }}
       >
         <Shape
           shape={shape}
@@ -233,6 +231,7 @@ function Star({ dateKey, points, tiers, isToday, isFuture, shape, color, motion 
           ghost={isFuture}
         />
       </svg>
+      {children}
     </div>
   );
 }
@@ -310,15 +309,14 @@ export default function StarField({ days, tiers, todayKey, startDateKey, setting
                     shape={starShape}
                     color={starColor}
                     motion={starMotion}
-                  />
-                  {hasMark && (
-                    <OrbitTrail
-                      period={orbitPeriod(settings.orbit.speed)}
-                      animate={settings.orbit.enabled !== false}
-                      dateKey={cell.key}
-                      motion={starMotion}
-                    />
-                  )}
+                  >
+                    {hasMark && (
+                      <OrbitTrail
+                        period={orbitPeriod(settings.orbit.speed)}
+                        animate={settings.orbit.enabled !== false}
+                      />
+                    )}
+                  </Star>
                 </div>
               );
             })}

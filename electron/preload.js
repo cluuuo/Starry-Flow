@@ -16,5 +16,12 @@ contextBridge.exposeInMainWorld('api', {
   saveMarkImage: (payload) => ipcRenderer.invoke('marks:saveImage', payload),
   readMarkImage: (file) => ipcRenderer.invoke('marks:readImage', file),
   deleteMarkImage: (file) => ipcRenderer.invoke('marks:deleteImage', file),
-  saveMarkImageAs: (payload) => ipcRenderer.invoke('marks:saveAs', payload)
+  saveMarkImageAs: (payload) => ipcRenderer.invoke('marks:saveAs', payload),
+  windowControl: (action) => ipcRenderer.send('window:control', action),
+  isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  onWindowMaximized: (cb) => {
+    const handler = (_event, maximized) => cb(maximized);
+    ipcRenderer.on('window:maximized', handler);
+    return () => ipcRenderer.removeListener('window:maximized', handler);
+  }
 });

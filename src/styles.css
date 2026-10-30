@@ -56,11 +56,30 @@ body::before {
 }
 
 /* ---------- 顶栏 ---------- */
+/* 无边框窗口：顶部留白与 header 共同作为可拖拽的标题栏 */
+.titlebar-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 46px;
+  z-index: 5;
+  -webkit-app-region: drag;
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 22px;
+  margin-bottom: 10px;
+  padding-top: 18px; /* 下移以拉开与窗口按钮的距离，同时靠近下方专注卡片 */
+  -webkit-app-region: drag;
+}
+
+/* 拖拽区内的交互元素必须排除，否则点击会被拖拽行为吞掉 */
+.app-header button,
+.app-header input {
+  -webkit-app-region: no-drag;
 }
 
 .app-title {
@@ -104,6 +123,52 @@ body::before {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 自绘窗口按钮：固定在窗口右上角，贴合经典 Windows 标题栏的点击习惯 */
+.win-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: stretch;
+  -webkit-app-region: no-drag;
+}
+
+.win-btn {
+  width: 44px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.win-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.win-btn:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}
+
+.win-btn.win-close:hover {
+  background: #d94b4b;
+  color: #ffffff;
 }
 
 .demo-tag {
@@ -1112,11 +1177,11 @@ body::before {
 
 .star.is-future {
   opacity: 0.8;
-  filter: drop-shadow(0 0 5px rgba(178, 205, 255, 0.5)) drop-shadow(0 0 13px rgba(140, 180, 255, 0.2));
 }
 
 .star.is-future .star-svg {
   animation: future-breathe 4.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgba(178, 205, 255, 0.5)) drop-shadow(0 0 13px rgba(140, 180, 255, 0.2));
 }
 
 @keyframes future-breathe {
@@ -1297,16 +1362,12 @@ body::before {
   cursor: pointer;
 }
 
+/* 卫星挂在星点内部，随星点同一份 transform 动画移动，天然保持相对位置 */
 .orbit-wrap {
   position: absolute;
-  inset: -8px;
+  inset: -10px;
   pointer-events: none;
   z-index: 2;
-  /* 与星点本体共用同一组漂浮参数，卫星始终贴在星点的相对位置上 */
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-  animation-direction: alternate;
-  will-change: transform;
 }
 
 /* 只做旋转，绝不缩放，圆点才不会变形；本体与尾迹共用同一个颜色 */

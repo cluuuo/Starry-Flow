@@ -50,6 +50,7 @@ export default function App() {
   const [demoMode, setDemoMode] = useState(false);
   const [marks, setMarks] = useState({});
   const [activeDay, setActiveDay] = useState(null);
+  const [maximized, setMaximized] = useState(false);
   const pendingCommandRef = useRef(null);
 
   const todayKey = logicalDateKey(new Date(), settings.dayStartMinutes);
@@ -60,6 +61,14 @@ export default function App() {
     const root = document.documentElement;
     Object.entries(vars).forEach(([key, value]) => root.style.setProperty(key, value));
   }, [settings.background]);
+
+  // 自绘标题栏：同步窗口最大化状态，用于切换「最大化 / 还原」图标
+  useEffect(() => {
+    const api = window.api;
+    if (!api || !api.onWindowMaximized) return undefined;
+    api.isWindowMaximized().then((v) => setMaximized(!!v)).catch(() => {});
+    return api.onWindowMaximized((v) => setMaximized(!!v));
+  }, []);
 
   // 初始加载
   useEffect(() => {
@@ -357,6 +366,8 @@ export default function App() {
         '--tier-5': titleTiers[4]
       }}
     >
+      {/* 无边框窗口的顶部拖拽区，与下方 header 一起构成自绘标题栏 */}
+      <div className="titlebar-strip" />
       <header className="app-header">
         <div className="app-title">
           <img className="app-logo" src="./icon.png" alt="" />
@@ -370,6 +381,47 @@ export default function App() {
           <button className="settings-btn" onClick={() => setDrawerOpen(true)}>
             ⚙ 设置
           </button>
+          {window.api && (
+            <div className="win-controls">
+              <button
+                className="win-btn"
+                title="最小化"
+                aria-label="最小化"
+                onClick={() => window.api.windowControl('minimize')}
+              >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M2.5 6h7" />
+                </svg>
+              </button>
+              <button
+                className="win-btn"
+                title={maximized ? '还原' : '最大化'}
+                aria-label={maximized ? '还原' : '最大化'}
+                onClick={() => window.api.windowControl('maximize')}
+              >
+                {maximized ? (
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M4.5 4.5h5v5h-5z" />
+                    <path d="M2.5 7.5v-5h5" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <rect x="2.5" y="2.5" width="7" height="7" />
+                  </svg>
+                )}
+              </button>
+              <button
+                className="win-btn win-close"
+                title="关闭"
+                aria-label="关闭"
+                onClick={() => window.api.windowControl('close')}
+              >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M3 3l6 6M9 3l-6 6" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
