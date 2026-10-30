@@ -113,7 +113,7 @@ export default function SettingsWindow({
     setBackupBusy(false);
     if (res?.canceled) return;
     setBackupMsg(res?.ok
-      ? { ok: true, text: `已导入 ${res.summary?.days || 0} 天记录，累计 ${res.summary?.cumulative ?? 0} 分。` }
+      ? { ok: true, text: `已导入 ${res.summary?.days || 0} 天记录，累计 ${res.summary?.cumulative ?? 0} 积分。` }
       : { ok: false, text: res?.error || '导入失败' });
   };
 
@@ -123,6 +123,7 @@ export default function SettingsWindow({
   };
 
   const updateMotion = (patch) => update({ starMotion: { ...settings.starMotion, ...patch } });
+  const updateOrbit = (patch) => update({ orbit: { ...settings.orbit, ...patch } });
   const updateSky = (patch) => update({ sky: { ...settings.sky, ...patch } });
 
   return (
@@ -222,7 +223,7 @@ export default function SettingsWindow({
                   <div className="settings-title">星点外观</div>
                   <button className="settings-reset-mini" onClick={() => resetKeys(['starShape', 'starColor'])}>恢复默认</button>
                 </div>
-                <p className="settings-desc">星点是每日贡献的化身，形状与颜色都可按喜好调整。</p>
+                <p className="settings-desc">星点是每日积分的化身，形状与颜色都可按喜好调整。</p>
 
                 <div className="field-row field-col">
                   <label>形状</label>
@@ -271,7 +272,12 @@ export default function SettingsWindow({
                 <p className="settings-desc">让星点在原位附近轻轻游移，幅度过大会显得晃动；档位越高晃动越快。</p>
 
                 <div className="field-row">
-                  <label>启用漂浮</label>
+                  <span className="field-label-group">
+                    <label>启用漂浮动效</label>
+                    {settings.starMotion.enabled && (
+                      <span className="field-note">开启后可能增加性能负载</span>
+                    )}
+                  </span>
                   <button
                     className={`switch ${settings.starMotion.enabled ? 'on' : ''}`}
                     onClick={() => updateMotion({ enabled: !settings.starMotion.enabled })}
@@ -311,6 +317,43 @@ export default function SettingsWindow({
 
               <div className="settings-section">
                 <div className="settings-title-row">
+                  <div className="settings-title">印痕环绕</div>
+                  <button className="settings-reset-mini" onClick={() => resetKeys(['orbit'])}>恢复默认</button>
+                </div>
+                <p className="settings-desc">有印痕的星点周围有一颗卫星沿轨道环绕；关闭后改为在星点右下角显示一个光点，仍会标示哪些日期留有印痕。</p>
+
+                <div className="field-row">
+                  <span className="field-label-group">
+                    <label>启用环绕动效</label>
+                    {settings.orbit.enabled && (
+                      <span className="field-note">开启后可能增加性能负载</span>
+                    )}
+                  </span>
+                  <button
+                    className={`switch ${settings.orbit.enabled ? 'on' : ''}`}
+                    onClick={() => updateOrbit({ enabled: !settings.orbit.enabled })}
+                  >
+                    <span className="switch-knob" />
+                  </button>
+                </div>
+
+                <div className="field-row">
+                  <label>环绕速度</label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={5}
+                    step={1}
+                    value={settings.orbit.speed}
+                    disabled={!settings.orbit.enabled}
+                    onChange={(e) => updateOrbit({ speed: Number(e.target.value) })}
+                  />
+                  <span className="field-value">{settings.orbit.speed} 档</span>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-title-row">
                   <div className="settings-title">夜空</div>
                   <button className="settings-reset-mini" onClick={() => resetKeys(['sky'])}>恢复默认</button>
                 </div>
@@ -319,7 +362,12 @@ export default function SettingsWindow({
                 </p>
 
                 <div className="field-row">
-                  <label>星空动态</label>
+                  <span className="field-label-group">
+                    <label>启用动态星空效果</label>
+                    {settings.sky.animated !== false && (
+                      <span className="field-note">开启后可能增加性能负载</span>
+                    )}
+                  </span>
                   <button
                     className={`switch ${settings.sky.animated !== false ? 'on' : ''}`}
                     onClick={() => updateSky({ animated: settings.sky.animated === false })}
@@ -369,7 +417,7 @@ export default function SettingsWindow({
 
               <div className="settings-section settings-wide">
                 <div className="settings-title-row">
-                  <div className="settings-title">贡献档位</div>
+                  <div className="settings-title">积分档位</div>
                   <button className="settings-reset-mini" onClick={() => resetKeys(['tiers'])}>恢复默认</button>
                 </div>
                 <p className="settings-desc">当日积分达到阈值即点亮更亮的一级；L1 为有效签到线。</p>
@@ -386,7 +434,7 @@ export default function SettingsWindow({
                           step={100}
                           onChange={(e) => updateTier(i, { points: Math.max(0, Number(e.target.value)) })}
                         />
-                        <span className="tier-unit">分</span>
+                        <span className="tier-unit">积分</span>
                         <input
                           type="color"
                           className="tier-color"
@@ -442,7 +490,7 @@ export default function SettingsWindow({
                 </div>
                 <p className="settings-desc">
                   从「新一天开始」到次日「结算封存」之间的活动都算作同一天。
-                  例：默认 07:00 开始、次日 04:00 封存，则今晚 20:00 熬夜到 01:00 的贡献都计入今天。
+                  例：默认 07:00 开始、次日 04:00 封存，则今晚 20:00 熬夜到 01:00 的积分都计入今天。
                 </p>
                 <div className="field-row">
                   <label>新一天开始</label>
@@ -491,7 +539,7 @@ export default function SettingsWindow({
                     value={fset.exchange_rate}
                     onChange={(e) => updateFocus({ exchange_rate: Math.max(1, Number(e.target.value) || 0) })}
                   />
-                  <span className="field-hint">分 / 1 {allowanceName}</span>
+                  <span className="field-hint">积分 / 1 {allowanceName}</span>
                 </div>
 
                 <div className="field-row">
@@ -539,7 +587,7 @@ export default function SettingsWindow({
                   <button className="settings-reset-mini" onClick={resetFocusRules}>恢复默认</button>
                 </div>
                 <p className="settings-desc">
-                  基础速度随连续专注时长逐档加速；严格模式改用固定速度，离开专注进程会扣分。规则保存后由采集端实时生效。
+                  基础速度随连续专注时长逐档加速；严格模式改用固定速度，离开专注进程会扣除积分。规则保存后由采集端实时生效。
                 </p>
 
                 <div className="rule-inline">
@@ -553,7 +601,7 @@ export default function SettingsWindow({
                       value={fset.base_points_per_sec}
                       onChange={(e) => updateFocus({ base_points_per_sec: Math.max(1, Number(e.target.value) || 0) })}
                     />
-                    <span className="field-hint">分 / 秒</span>
+                    <span className="field-hint">积分/秒</span>
                   </div>
 
                   <div className="field-row">
@@ -587,7 +635,7 @@ export default function SettingsWindow({
                       value={seg[1]}
                       onChange={(e) => updateSegment(i, 'speed', Math.max(1, Number(e.target.value) || 0))}
                     />
-                    <span className="focus-seg-text">分 / 秒</span>
+                    <span className="focus-seg-text">积分/秒</span>
                   </div>
                 ))}
 
@@ -603,7 +651,7 @@ export default function SettingsWindow({
                     </button>
                   </div>
                   <div className="field-row">
-                    <label>严格模式速度</label>
+                    <label>严格模式积分速度</label>
                     <input
                       type="number"
                       className="focus-number-input"
@@ -611,10 +659,10 @@ export default function SettingsWindow({
                       value={strict.points_per_sec}
                       onChange={(e) => updateStrict({ points_per_sec: Math.max(1, Number(e.target.value) || 0) })}
                     />
-                    <span className="field-hint">分 / 秒</span>
+                    <span className="field-hint">积分/秒</span>
                   </div>
                   <div className="field-row">
-                    <label>离开进程扣分</label>
+                    <label>离开进程扣除积分</label>
                     <input
                       type="number"
                       className="focus-number-input"
@@ -622,7 +670,7 @@ export default function SettingsWindow({
                       value={strict.punish_points}
                       onChange={(e) => updateStrict({ punish_points: Math.max(0, Number(e.target.value) || 0) })}
                     />
-                    <span className="field-hint">分 / 次</span>
+                    <span className="field-hint">积分/秒</span>
                   </div>
                   <div className="field-row">
                     <label>结算门槛</label>
@@ -634,7 +682,7 @@ export default function SettingsWindow({
                       value={strict.threshold}
                       onChange={(e) => updateStrict({ threshold: Math.max(0, Number(e.target.value) || 0) })}
                     />
-                    <span className="field-hint">分</span>
+                    <span className="field-hint">积分</span>
                   </div>
                 </div>
                 <p className="settings-desc settings-note">严格模式下，当日积分低于门槛时无法结算。</p>

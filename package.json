@@ -1,8 +1,8 @@
 {
   "name": "starry-flow",
   "productName": "Starry Flow",
-  "version": "2.4.0",
-  "description": "Starry Flow 星流 · 专注贡献可视化",
+  "version": "2.6.1",
+  "description": "Starry Flow 星流 · 专注目标与进度可视化",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -k -n vite,electron \"vite\" \"wait-on http://localhost:5173 && electron . --dev\"",

@@ -11,7 +11,8 @@ import {
   hexToRgb,
   visibleDayCount,
   seededRandom,
-  motionPeriod
+  motionPeriod,
+  orbitPeriod
 } from '../lib/logic';
 
 // 圆润四芒星：尖角用 round linejoin 磨圆，观感柔软无侵略性
@@ -35,16 +36,17 @@ function pathOf(shape) {
 // 逐帧计算位置，避免父级缩放把圆点压扁
 const ORBIT_A = 46; // 横向半径（viewBox 单位）
 const ORBIT_B = 27; // 纵向半径
-const ORBIT_PERIOD = 3800; // 环绕一周毫秒
 const TAIL_SPAN = 1.55; // 尾迹覆盖的弧度
 const TAIL_SEGS = 20; // 亮芯分段数
 const HALO_SEGS = 10; // 光晕分段数
 
-function OrbitTrail() {
+function OrbitTrail({ period, animate, dateKey, motion }) {
   const headRef = useRef(null);
   const tailRef = useRef(null);
   const coreRefs = useRef([]);
   const haloRefs = useRef([]);
+  // 与星点本体共用同一份漂浮参数，光点/卫星始终跟着星点一起移动
+  const motionStyle = useMemo(() => starMotionStyle(dateKey, motion), [dateKey, motion]);
 
   useEffect(() => {
     const cx = 50;
@@ -67,9 +69,8 @@ function OrbitTrail() {
     };
 
     let th = 0;
-    const tick = (now) => {
+    const draw = (p) => {
       // 所有卫星共用同一绝对时钟，任何时刻都处于同一角度，整体整齐不凌乱
-      const p = (now % ORBIT_PERIOD) / ORBIT_PERIOD;
       th = p * TAU;
 
       // 上半圈视为绕到星点背后，整体压暗
@@ -85,15 +86,31 @@ function OrbitTrail() {
 
       layout(coreRefs, TAIL_SEGS);
       layout(haloRefs, HALO_SEGS);
+    };
 
+    // 关闭环绕动效时不跑逐帧刷新，改为在星点右下角显示一个固定光点
+    if (!animate) return undefined;
+
+    const tick = (now) => {
+      draw((now % period) / period);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [period, animate]);
+
+  if (!animate) {
+    return (
+      <span className="orbit-wrap" style={motionStyle} aria-hidden="true">
+        <svg viewBox="0 0 100 100" className="orbit-svg is-fixed">
+          <circle className="orbit-head" cx="76" cy="76" r="4.2" />
+        </svg>
+      </span>
+    );
+  }
 
   return (
-    <span className="orbit-wrap" aria-hidden="true">
+    <span className="orbit-wrap" style={motionStyle} aria-hidden="true">
       <svg viewBox="0 0 100 100" className="orbit-svg">
         {Array.from({ length: HALO_SEGS }).map((_, i) => {
           const f = i / (HALO_SEGS - 1);
@@ -160,6 +177,23 @@ function Shape({ shape, color, ghost }) {
   );
 }
 
+// 漂浮参数：以日期为种子，保证同一颗星每次渲染轨迹一致；
+// 方向、幅度、周期、相位都单独随机，整体看起来更自然。
+// 星点本体与印痕卫星共用同一份参数，卫星才能始终贴合在星点的相对位置上
+function starMotionStyle(dateKey, motion) {
+  if (!motion || !motion.enabled) return { animation: 'none' };
+  const rnd = seededRandom(dateKey + '-m');
+  const ampScale = 0.55 + rnd() * 0.45;
+  const baseSeconds = motionPeriod(motion.speed);
+  const duration = baseSeconds * (1 + rnd() * 0.4);
+  return {
+    animationName: MOTION[Math.floor(rnd() * MOTION.length)],
+    animationDuration: `${duration.toFixed(2)}s`,
+    animationDelay: `${(-rnd() * duration).toFixed(2)}s`,
+    '--amp': `${(motion.amplitude * ampScale).toFixed(2)}px`
+  };
+}
+
 // 单颗星点
 function Star({ dateKey, points, tiers, isToday, isFuture, shape, color, motion }) {
   const level = tierIndex(points, tiers);
@@ -171,21 +205,7 @@ function Star({ dateKey, points, tiers, isToday, isFuture, shape, color, motion 
   const fillColor = tierHex(color, level, tier);
   const { r, g, b } = hexToRgb(fillColor);
 
-  // 运动参数：以日期为种子，保证同一颗星每次渲染轨迹一致；
-  // 方向、幅度、周期、相位都单独随机，整体看起来更自然
-  const motionStyle = useMemo(() => {
-    if (!motion || !motion.enabled) return { animation: 'none' };
-    const rnd = seededRandom(dateKey + '-m');
-    const ampScale = 0.55 + rnd() * 0.45;
-    const baseSeconds = motionPeriod(motion.speed);
-    const duration = baseSeconds * (1 + rnd() * 0.4);
-    return {
-      animationName: MOTION[Math.floor(rnd() * MOTION.length)],
-      animationDuration: `${duration.toFixed(2)}s`,
-      animationDelay: `${(-rnd() * duration).toFixed(2)}s`,
-      '--amp': `${(motion.amplitude * ampScale).toFixed(2)}px`
-    };
-  }, [dateKey, motion]);
+  const motionStyle = useMemo(() => starMotionStyle(dateKey, motion), [dateKey, motion]);
 
   const glowStyle = useMemo(() => {
     if (!lit) return {};
@@ -291,7 +311,14 @@ export default function StarField({ days, tiers, todayKey, startDateKey, setting
                     color={starColor}
                     motion={starMotion}
                   />
-                  {hasMark && <OrbitTrail />}
+                  {hasMark && (
+                    <OrbitTrail
+                      period={orbitPeriod(settings.orbit.speed)}
+                      animate={settings.orbit.enabled !== false}
+                      dateKey={cell.key}
+                      motion={starMotion}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -311,7 +338,7 @@ export default function StarField({ days, tiers, todayKey, startDateKey, setting
               '等待点亮'
             ) : tip.points > 0 ? (
               <>
-                <span className="tip-num">{tip.points.toLocaleString()}</span> 分
+                <span className="tip-num">{tip.points.toLocaleString()}</span> 积分
                 {tip.level >= 0 && (
                   <span className="tip-tier" style={{ color: starColor }}>
                     · L{tip.level + 1}

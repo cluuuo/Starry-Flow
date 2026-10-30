@@ -752,7 +752,7 @@ body::before {
   margin-top: 10px;
   font-size: 12px;
   color: var(--text-dim);
-  text-align: right;
+  text-align: left;
 }
 
 .focus-meta {
@@ -1242,48 +1242,53 @@ body::before {
   transform: translate(-50%, -100%);
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
+  border-radius: 10px;
+  padding: 11px 15px;
+  min-width: 124px;
+  font-size: 13px;
+  line-height: 1.5;
   pointer-events: none;
   z-index: 50;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
   white-space: nowrap;
 }
 
 .tip-date {
   color: var(--text-faint);
-  font-size: 11px;
-  margin-bottom: 2px;
+  font-size: 12px;
+  margin-bottom: 6px;
 }
 
 .tip-num {
+  font-size: 17px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .tip-tier {
-  margin-left: 6px;
+  margin-left: 8px;
+  font-size: 12px;
 }
 
 .tip-tag {
-  margin-left: 6px;
-  font-size: 10px;
+  margin-left: 8px;
+  font-size: 11px;
   color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 4px;
-  padding: 0 4px;
+  border-radius: 5px;
+  padding: 1px 5px;
+  vertical-align: 1px;
 }
 
 .tip-mark {
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 7px;
+  font-size: 12px;
   color: var(--accent);
 }
 
 .tip-hint {
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 6px;
+  font-size: 12px;
   color: var(--text-faint);
 }
 
@@ -1297,6 +1302,11 @@ body::before {
   inset: -8px;
   pointer-events: none;
   z-index: 2;
+  /* 与星点本体共用同一组漂浮参数，卫星始终贴在星点的相对位置上 */
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  will-change: transform;
 }
 
 /* 只做旋转，绝不缩放，圆点才不会变形；本体与尾迹共用同一个颜色 */
@@ -1306,6 +1316,11 @@ body::before {
   overflow: visible;
   transform: rotate(-14deg);
   color: #ffffff;
+}
+
+/* 关闭环绕动效时只是一个固定光点，不需要轨道倾斜 */
+.orbit-svg.is-fixed {
+  transform: none;
 }
 
 /* 端点用 butt：相邻段端对端相接，重叠会因透明度叠加产生斑马纹 */
@@ -2077,6 +2092,33 @@ body::before {
   font-size: 13px;
 }
 
+/* 时间选择器的钟表图标默认是黑色，深色背景下看不清，统一反色适配当前底色 */
+.field-row input[type='time']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.field-row input[type='time']::-webkit-calendar-picker-indicator:hover {
+  opacity: 0.95;
+}
+
+/* 开关行：标签与提示并排，开关仍靠右 */
+.field-label-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 开关开启后的性能提示，低可视度小字，不抢主文案 */
+.field-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
 .field-row input[type='color'] {
   width: 48px;
   height: 30px;
@@ -2409,6 +2451,11 @@ body::before {
 .focus-seg-text {
   color: var(--text-faint);
   white-space: nowrap;
+}
+
+/* 兑换/花费行：输入框与额度名称之间留出呼吸空间 */
+.field-row > .focus-seg-text {
+  margin-left: 10px;
 }
 
 .focus-value-text {

@@ -185,7 +185,7 @@ export default function MarkPanel({
                 }
               />
               {level >= 0 ? `L${level + 1}` : '未达签到线'}
-              <span className="mark-points">{points.toLocaleString()} 分</span>
+              <span className="mark-points">{points.toLocaleString()} 积分</span>
               {isToday && <span className="mark-today">今天</span>}
             </div>
           </div>

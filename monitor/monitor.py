@@ -325,7 +325,7 @@ def handle_command(data, cmd, key):
         already = num(data["settled"].get(key, 0), 0)
         if today_points <= 0:
             if already > 0:
-                add_notice(data, False, "本轮没有新增积分，今日已结算 %d 分。" % already)
+                add_notice(data, False, "本轮没有新增积分，今日已结算 %d 积分。" % already)
             else:
                 add_notice(data, False, "今日还没有积分，无需结算。")
             return
@@ -346,7 +346,7 @@ def handle_command(data, cmd, key):
         data["focus_lost"] = False
         data["penalty_active"] = False
         data["warn_message"] = None
-        add_notice(data, True, "已存入累计积分 %d 分，今日共结算 %d 分。" % (delta, num(data["settled"].get(key, 0), 0)))
+        add_notice(data, True, "已存入累计积分 %d，今日共结算 %d 积分。" % (delta, num(data["settled"].get(key, 0), 0)))
         return
 
     if action == "adjust_totals":
@@ -572,7 +572,7 @@ def main():
                     data["current_speed"] = 0
                     if strict["enabled"]:
                         data["penalty_active"] = True
-                        data["warn_message"] = "已离开专注进程，每秒扣 %d 分" % strict["punish_points"]
+                        data["warn_message"] = "已离开专注进程，每秒扣 %d 积分" % strict["punish_points"]
                         away_seconds += delta
                         while away_seconds >= 1.0:
                             away_seconds -= 1.0

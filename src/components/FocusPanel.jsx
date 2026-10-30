@@ -215,7 +215,7 @@ export default function FocusPanel({ focus, todayPoints, tiers, starColor, notic
         <div className="focus-sub">
           {level >= 0
             ? `已达成 L${level + 1}`
-            : `距 L1 还差 ${(tiers[0].points - todayPoints).toLocaleString()} 分`}
+            : `距 L1 还差 ${(tiers[0].points - todayPoints).toLocaleString()} 积分`}
         </div>
         <div className="focus-progress">
           <div className="progress-track">
@@ -259,14 +259,14 @@ export default function FocusPanel({ focus, todayPoints, tiers, starColor, notic
           </div>
           <div className="focus-hint">
             {next
-              ? `再得 ${(next.points - todayPoints).toLocaleString()} 分升至 L${tiers.indexOf(next) + 1}`
+              ? `再得 ${(next.points - todayPoints).toLocaleString()} 积分升至 L${tiers.indexOf(next) + 1}`
               : `已达 L${tiers.length}，保持状态！`}
           </div>
         </div>
         <div className="focus-meta">
-          <span>累计 {cumulative.toLocaleString()} 分</span>
+          <span>累计 {cumulative.toLocaleString()} 积分</span>
           <span className="focus-dot">·</span>
-          <span>当前速度 {speed} 分/秒</span>
+          <span>当前速度 {speed} 积分/秒</span>
           {strict?.enabled && (
             <>
               <span className="focus-dot">·</span>

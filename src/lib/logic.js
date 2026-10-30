@@ -25,7 +25,7 @@ export function tierIndex(points, tiers) {
   for (let i = 0; i < tiers.length; i++) {
     if (points >= tiers[i].points) idx = i;
   }
-  return idx; // -1 表示无贡献
+  return idx; // -1 表示未达任何档位
 }
 
 export function nextTier(points, tiers) {
@@ -58,6 +58,10 @@ export const DEFAULT_SETTINGS = {
     amplitude: 2,            // 漂移幅度 px，上限 12
     speed: 3                 // 档位 1-5，越高晃动越快
   },
+  orbit: {
+    enabled: true,           // 印痕星点的环绕卫星动效
+    speed: 3                 // 档位 1-5，3 档为默认环绕速度
+  },
   sky: {
     density: 1,              // 星点密度倍数 0.4 ~ 2
     animated: true,          // 星空动态效果：星野流动、星星闪烁、流星
@@ -81,6 +85,14 @@ export const SKY_PERIODS = [60, 40, 28, 18, 10];
 export function skyFlowPeriod(level) {
   const i = Math.max(0, Math.min(SKY_PERIODS.length - 1, Math.round(Number(level) || 3) - 1));
   return SKY_PERIODS[i];
+}
+
+// 印痕卫星环绕速度：1-5 档，档位越高环绕一周越快（3 档 3.8 秒为默认）
+export const ORBIT_PERIODS = [7000, 5200, 3800, 2600, 1600];
+
+export function orbitPeriod(level) {
+  const i = Math.max(0, Math.min(ORBIT_PERIODS.length - 1, Math.round(Number(level) || 3) - 1));
+  return ORBIT_PERIODS[i];
 }
 
 // 旧存档里 sky.baseDuration 存的是秒数，迁移时折算成新档位
@@ -117,6 +129,13 @@ export function mergeSettings(saved) {
   out.starMotion.amplitude = Number.isFinite(rawAmp)
     ? Math.max(0, Math.min(12, rawAmp))
     : base.starMotion.amplitude;
+  const orbitSaved = saved.orbit || {};
+  out.orbit = { ...base.orbit, ...orbitSaved };
+  out.orbit.enabled = orbitSaved.enabled !== false;
+  const rawOrbitSpeed = Number(orbitSaved.speed);
+  out.orbit.speed = Number.isFinite(rawOrbitSpeed)
+    ? Math.max(1, Math.min(5, Math.round(rawOrbitSpeed)))
+    : base.orbit.speed;
   const skySaved = saved.sky || {};
   out.sky = { ...base.sky, ...skySaved };
   const rawFlow = Number(skySaved.flowSpeed);
