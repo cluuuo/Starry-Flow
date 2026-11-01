@@ -15,7 +15,7 @@ export default function StatsBar({ days, todayKey, dayStartMinutes, tiers }) {
   );
 
   const stats = [
-    { label: '累计积分', value: totalPoints.toLocaleString() },
+    { label: '总获积分池', value: totalPoints.toLocaleString() },
     { label: '连续签到', value: `${streak} 天` },
     { label: '有效天数', value: `${validDays} 天` },
     { label: '单日最高', value: bestDay.toLocaleString() }

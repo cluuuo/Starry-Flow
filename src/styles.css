@@ -855,6 +855,24 @@ body::before {
   border-top: 1px solid var(--border-soft);
 }
 
+/* 左侧一行：本日累计在左，随心额度紧随其后，两块共用同一套字号与配色 */
+.focus-foot-left {
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+  min-width: 0;
+}
+
+.focus-today {
+  gap: 8px;
+}
+
+.focus-today-unit {
+  font-size: 12px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
 .focus-allowance {
   display: flex;
   align-items: baseline;

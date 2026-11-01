@@ -138,7 +138,7 @@ export default function SettingsWindow({
     });
   };
 
-  // 数据调试：直接增减累计积分与额度，正负皆可
+  // 数据调试：直接增减已结算积分与额度，正负皆可
   const applyDebug = (patch) => {
     if (!onFocusCommand) return;
     onFocusCommand('adjust_totals', { points: 0, allowance: 0, ...patch });
@@ -187,7 +187,7 @@ export default function SettingsWindow({
     setBackupBusy(false);
     if (res?.canceled) return;
     setBackupMsg(res?.ok
-      ? { ok: true, text: `已导入 ${res.summary?.days || 0} 天记录，累计 ${res.summary?.cumulative ?? 0} 积分。` }
+      ? { ok: true, text: `已导入 ${res.summary?.days || 0} 天记录，已结算积分 ${res.summary?.cumulative ?? 0}。` }
       : { ok: false, text: res?.error || '导入失败' });
   };
 
@@ -627,7 +627,7 @@ export default function SettingsWindow({
                   <button className="settings-reset-mini" onClick={resetExchange}>恢复默认</button>
                 </div>
                 <p className="settings-desc">
-                  累计积分可按比例兑换成{allowanceName}，用于给自己发奖励；花费只减少额度，不动积分。
+                  已结算积分可按比例兑换成{allowanceName}，用于给自己发奖励；花费只减少额度，不动积分。
                 </p>
 
                 <div className="field-row">
@@ -812,7 +812,7 @@ export default function SettingsWindow({
                 ) : (
                   <>
                     <div className="debug-row">
-                      <span className="debug-label">累计积分</span>
+                      <span className="debug-label">已结算积分</span>
                       <span className="focus-value-text">{cumulative.toLocaleString()}</span>
                     </div>
                     <div className="debug-row">

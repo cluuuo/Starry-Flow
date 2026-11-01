@@ -369,6 +369,9 @@ export default function App() {
     setDays(generateMockDays(demoStart, n));
   }, [todayKey]);
 
+  // 当日累计 = 今日已结算部分 + 本轮实时积分；与「总获积分池」区分开
+  const todaySettled = (focus?.settled && focus.settled[todayKey]) || 0;
+
   // 星点显示「当日已结算部分 + 本轮新积分」：结算后颜色保留，同日多轮专注继续叠加亮度
   const displayDays = useMemo(() => {
     const settled = focus?.settled || {};
@@ -499,6 +502,7 @@ export default function App() {
       <FocusPanel
         focus={focus}
         todayPoints={todayPoints}
+        todayTotal={todayPoints + todaySettled}
         tiers={settings.tiers}
         starColor={settings.starColor}
         connected={!!focus}

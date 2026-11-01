@@ -56,6 +56,7 @@ function StrictMeteors() {
 export default function FocusPanel({
   focus,
   todayPoints,
+  todayTotal,
   tiers,
   starColor,
   connected,
@@ -85,7 +86,6 @@ export default function FocusPanel({
   const next = nextTier(todayPoints, tiers);
   const lastTierPoints = Math.max(1, tiers[tiers.length - 1].points);
 
-  const cumulative = focus?.cumulative_points || 0;
   const allowance = focus?.allowance || 0;
   const allowanceName = settings?.allowance_name || '随心额度';
 
@@ -454,8 +454,6 @@ export default function FocusPanel({
           </div>
         </div>
         <div className="focus-meta">
-          <span>累计 {cumulative.toLocaleString()} 积分</span>
-          <span className="focus-dot">·</span>
           <span>当前速度 {speed} 积分/秒</span>
           {strict?.enabled && (
             <>
@@ -470,9 +468,18 @@ export default function FocusPanel({
       </div>
 
       <div className="focus-foot">
-        <div className="focus-allowance">
-          <span className="focus-allowance-label">{allowanceName}</span>
-          <span className="focus-allowance-value">{allowance}</span>
+        <div className="focus-foot-left">
+          <div className="focus-allowance focus-today">
+            <span className="focus-allowance-label">本日累计</span>
+            <span className="focus-allowance-value">
+              {(todayTotal ?? todayPoints).toLocaleString()}
+            </span>
+            <span className="focus-today-unit">积分</span>
+          </div>
+          <div className="focus-allowance">
+            <span className="focus-allowance-label">{allowanceName}</span>
+            <span className="focus-allowance-value">{allowance}</span>
+          </div>
         </div>
         <div className="focus-buttons">
           <button

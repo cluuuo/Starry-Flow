@@ -335,7 +335,7 @@ def handle_command(data, cmd, key):
         strict = settings["strict"]
         total_today = already + today_points
         if strict["enabled"] and total_today < strict["threshold"]:
-            add_notice(data, False, "严格模式下，今日累计积分需达到 %d 才能结算。当前 %d，未达到门槛，本次结算已取消。" % (strict["threshold"], total_today))
+            add_notice(data, False, "严格模式下，本日累计积分需达到 %d 才能结算。当前 %d，未达到门槛，本次结算已取消。" % (strict["threshold"], total_today))
             return
         delta = settle_into_cumulative(data, key)
         if delta <= 0:
@@ -349,7 +349,7 @@ def handle_command(data, cmd, key):
         data["focus_lost"] = False
         data["penalty_active"] = False
         data["warn_message"] = None
-        add_notice(data, True, "已存入累计积分 %d，今日共结算 %d 积分。" % (delta, num(data["settled"].get(key, 0), 0)))
+        add_notice(data, True, "已存入已结算积分 %d，今日共结算 %d 积分。" % (delta, num(data["settled"].get(key, 0), 0)))
         return
 
     if action == "adjust_totals":
@@ -362,7 +362,7 @@ def handle_command(data, cmd, key):
             data["cumulative_points"] = max(0, int(num(data["cumulative_points"], 0)) + points)
         if allowance_delta:
             data["allowance"] = max(0, int(num(data["allowance"], 0)) + allowance_delta)
-        add_notice(data, True, "已调整累计积分 %+d，%s %+d。" % (points, settings["allowance_name"], allowance_delta))
+        add_notice(data, True, "已调整已结算积分 %+d，%s %+d。" % (points, settings["allowance_name"], allowance_delta))
         return
 
     if action == "update_settings":
@@ -411,7 +411,7 @@ def handle_command(data, cmd, key):
     if action == "import":
         incoming = payload.get("data")
         if not isinstance(incoming, dict) or "cumulative_points" not in incoming:
-            add_notice(data, False, "备份文件无效，缺少累计积分。")
+            add_notice(data, False, "备份文件无效，缺少已结算积分数据。")
             return
         data["settings"] = merge_settings(incoming.get("settings"))
         data["cumulative_points"] = num(incoming.get("cumulative_points"), 0)
