@@ -34,7 +34,7 @@
 | 特殊白名单 | 已完成：规则设置内最多选 5 个进程（可含本软件），焦点落在这些软件上不算偏离、继续积分但按普通/严格模式各自的设定速度降速 |
 | 成就系统 | 功能已完成：条件达成自动获得纪念章、同一成就可反复获得、纪念章累计数量持久化；右下角「成就展厅」入口弹出展示窗口，含锥形打光纪念章。纪念章已用 SVG 绘制 8 种图形 |
 | 心理学模型 | 已完成：设置新增「心理学模型」页，含健康就寝（到点降速、就寝结算得纪念章）与对赌协议（未来星点设目标、达标奖励 + 礼花、未达比例产生赤字、平账得纪念章） |
-| 打包 | setup 安装版产出到 `release/`；2.8.1 已产出 `Starry Flow Setup 2.8.1.exe`（98.67MB，内置 monitor.exe 8.1MB，未签名）；2.8.0 及更早旧包同目录保留；portable 未生成 |
+| 打包 | 2.12.0 已产出 `release/Starry Flow Setup 2.12.0.exe`（98.69MB，内置 monitor.exe 8.08MB，未签名）；2.8.0 / 2.8.1 等旧包同目录保留；portable 未生成 |
 | 交付前文案审查 | 部分完成（星点引导文案已按用户意见改写，仍需全量复查） |
 
 **未发布改动（工作区）**
@@ -503,7 +503,7 @@ window.api = {
 4. **托盘与关窗行为（待用户确认）**：当前关窗即退出并结束采集端；若常驻托盘需拦截 `close` + `Tray`。
 5. **低功耗模式（可选）**：降低动画帧率、窗口失焦暂停 canvas 重绘，或提供 `app.disableHardwareAcceleration()` 开关。
 6. **成就条目与美术待定**：`src/lib/achievements.js` 现有 8 个成就（含乖乖睡觉 / 平账大师 / 对赌成功），纪念章图形在 `AchievementHall.jsx` 的 `MedalArt` 中用 SVG 绘制；正式条件与美术确定后替换定义与图形即可。
-7. **2.12.0 未打包**：下次出包需先 `npm run build:monitor` 再 `npm run pack` / `npm run dist`。
+7. **2.12.0 已出 setup**：`release/Starry Flow Setup 2.12.0.exe`；portable 仍未生成，需要时执行 `npx electron-builder --win portable`。
 
 ---
 
