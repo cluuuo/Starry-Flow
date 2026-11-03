@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('api', {
   saveMarkImageAs: (payload) => ipcRenderer.invoke('marks:saveAs', payload),
   getAchievements: () => ipcRenderer.invoke('achievements:get'),
   setAchievements: (data) => ipcRenderer.invoke('achievements:set', data),
+  // WebDAV 云备份：配置只保存地址与账号，密码由主进程加密落盘
+  getWebdavConfig: () => ipcRenderer.invoke('webdav:get'),
+  testWebdav: (cfg) => ipcRenderer.invoke('webdav:test', cfg),
+  uploadWebdav: (cfg) => ipcRenderer.invoke('webdav:upload', cfg),
+  listWebdav: () => ipcRenderer.invoke('webdav:list'),
+  restoreWebdav: (name) => ipcRenderer.invoke('webdav:restore', name),
   windowControl: (action) => ipcRenderer.send('window:control', action),
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   getWindowMode: () => ipcRenderer.invoke('window:get-mode'),

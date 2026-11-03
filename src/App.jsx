@@ -462,9 +462,8 @@ export default function App() {
     return window.api.exportBackup();
   }, []);
 
-  const handleBackupImport = useCallback(async () => {
-    if (!window.api) return { ok: false, error: '仅桌面端可用' };
-    const res = await window.api.importBackup();
+  // 本地导入与云端恢复共用：重建前端状态，避免界面停留在旧数据
+  const refreshAfterRestore = useCallback(async (res, message) => {
     if (res && res.ok) {
       if (res.settings) setSettings(mergeSettings(res.settings));
       try {
@@ -476,10 +475,21 @@ export default function App() {
         achievementsRef.current = st;
         setAchievements(st);
       } catch (e) { /* 忽略 */ }
-      setNotice({ id: Date.now(), ok: true, message: '备份已导入，采集已暂停，请重新选择进程。' });
+      setNotice({ id: Date.now(), ok: true, message });
     }
     return res;
   }, []);
+
+  const handleBackupImport = useCallback(async () => {
+    if (!window.api) return { ok: false, error: '仅桌面端可用' };
+    const res = await window.api.importBackup();
+    return refreshAfterRestore(res, '备份已导入，采集已暂停，请重新选择进程。');
+  }, [refreshAfterRestore]);
+
+  const handleWebdavRestored = useCallback(
+    (res) => refreshAfterRestore(res, '已从云端恢复备份，采集已暂停，请重新选择进程。'),
+    [refreshAfterRestore]
+  );
 
   // 数据存储位置：仅桌面端可用，路径保存在主进程的 storage.json 中
   const refreshStorageInfo = useCallback(async () => {
@@ -761,7 +771,7 @@ export default function App() {
 
         <div className="star-card-foot">
           <span>今天是第 {dayNumber} 天 · 第 {weekCount} 周</span>
-          <span className="foot-tip">点击任意点亮的星点，留下那一天的印痕</span>
+          <span className="foot-tip">点击点亮的星点写印痕；开启对赌后，今天与未来的星点都能立约</span>
         </div>
 
         {demoMode && loaded && (
@@ -801,6 +811,7 @@ export default function App() {
         onFocusCommand={sendFocusCommand}
         onBackupExport={handleBackupExport}
         onBackupImport={handleBackupImport}
+        onWebdavRestored={handleWebdavRestored}
         storageInfo={storageInfo}
         onRefreshStorage={refreshStorageInfo}
         onOpenStorage={handleOpenStorage}

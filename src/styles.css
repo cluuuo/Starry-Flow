@@ -3535,6 +3535,106 @@ body::before {
   color: #ffb4a8;
 }
 
+/* ---------- WebDAV 云备份 ---------- */
+.webdav-form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+.webdav-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.webdav-row label {
+  flex: none;
+  width: 82px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.webdav-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.webdav-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.webdav-input::placeholder {
+  color: var(--text-faint);
+}
+
+.webdav-window {
+  width: min(560px, 94vw);
+}
+
+.webdav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 44vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.webdav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.webdav-item.on {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.webdav-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.webdav-item-name {
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+.webdav-item-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.webdav-empty {
+  padding: 22px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.webdav-warn {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #ffb4a8;
+}
+
 /* ---------- 数据存储位置 ---------- */
 .storage-list {
   display: flex;

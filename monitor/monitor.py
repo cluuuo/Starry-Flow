@@ -671,8 +671,8 @@ def handle_command(data, cmd, key):
         if len(date) != 10 or date[4] != "-" or date[7] != "-":
             add_notice(data, False, "请选择有效的日期。")
             return
-        if date <= key:
-            add_notice(data, False, "对赌只能设在未来日期。")
+        if date < key:
+            add_notice(data, False, "对赌不能设在过去的日期。")
             return
         if goal <= 0:
             add_notice(data, False, "计划积分需大于 0。")
@@ -694,8 +694,8 @@ def handle_command(data, cmd, key):
         if not isinstance(item, dict) or item.get("status") != "pending":
             add_notice(data, False, "没有可取消的对赌。")
             return
-        if date <= key:
-            add_notice(data, False, "这一天已经开始，无法取消。")
+        if date < key:
+            add_notice(data, False, "过去日期的对赌无法取消。")
             return
         del data["pacts"][date]
         add_notice(data, True, "已取消 %s 的对赌。" % date)
@@ -803,6 +803,14 @@ def handle_command(data, cmd, key):
         data["days"] = {str(k): num(v, 0) for k, v in (incoming.get("days") or {}).items()}
         data["settled"] = {str(k): num(v, 0) for k, v in (incoming.get("settled") or {}).items()}
         data["history"] = [r for r in (incoming.get("history") or []) if isinstance(r, dict)]
+        # 完整恢复：对赌、赤字、事件计数与心理学配置都属于用户状态，缺一项就不算“一模一样”
+        data["psychology"] = sanitize_psychology(incoming.get("psychology"))
+        data["day_start_minutes"] = int(max(0, num(incoming.get("day_start_minutes"), data.get("day_start_minutes") or 7 * 60)))
+        data["pacts"] = clean_pacts(incoming.get("pacts"))
+        data["deficit"] = int(max(0, num(incoming.get("deficit"), 0)))
+        data["counters"] = clean_counters(incoming.get("counters"))
+        # 新版备份的 days / settled 已是同一口径，不再跑一次性迁移
+        data["settlement_version"] = 2
         data["today_date"] = key
         data["today_points"] = num(data["days"].get(key, 0), 0)
         data["running"] = False

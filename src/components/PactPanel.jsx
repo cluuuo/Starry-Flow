@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { addDays, parseDateKey, toDateKey } from '../lib/logic';
 
-// 对赌协议：点击未来日期的星点后，为那一天设定积分目标
+// 对赌协议：点击今天或未来日期的星点后，为那一天设定积分目标
 export default function PactPanel({
   open,
   dateKey,
@@ -18,7 +17,7 @@ export default function PactPanel({
   const [error, setError] = useState('');
 
   const existing = dateKey && pacts[dateKey] && pacts[dateKey].status === 'pending' ? pacts[dateKey] : null;
-  const minDate = todayKey ? toDateKey(addDays(parseDateKey(todayKey), 1)) : '';
+  const minDate = todayKey || '';
 
   useEffect(() => {
     if (!open) return;
@@ -41,7 +40,7 @@ export default function PactPanel({
   const submit = () => {
     const target = Number(goal);
     if (!date || date < minDate) {
-      setError('请选择明天或之后的日期。');
+      setError('请选择今天或之后的日期。');
       return;
     }
     if (!Number.isFinite(target) || target <= 0) {
@@ -92,7 +91,9 @@ export default function PactPanel({
           <p className="dialog-note">
             {existing
               ? `这一天已立下目标 ${existing.goal.toLocaleString()} 积分，保存会覆盖原计划。`
-              : `当天累计达到 ${ratio}% 即不产生赤字；达到 100% 会再奖励目标的 ${reward}%。`}
+              : date === todayKey
+                ? `今天立约：累计达到目标的 ${ratio}% 就不会产生赤字；达成 100% 会立即额外奖励目标的 ${reward}%。`
+                : `当天累计达到 ${ratio}% 即不产生赤字；达到 100% 会再奖励目标的 ${reward}%。`}
           </p>
           {error && <p className="dialog-error">{error}</p>}
         </div>

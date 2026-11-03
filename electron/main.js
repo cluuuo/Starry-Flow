@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -7,22 +7,28 @@ const { spawn } = require('child_process');
 // 开发模式：npm run dev 会带 --dev；打包后必然不成立
 const isDev = process.argv.includes('--dev') || !app.isPackaged;
 
-// 单实例锁：星空动画持续占用 GPU，重复启动会让占用成倍叠加，必须拦住
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow = null;
-if (!gotSingleInstanceLock) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    if (currentMode === 'mini') {
-      setWindowMode('compact');
-      return;
-    }
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  });
+
+// 第二个实例被唤起时，把已有窗口拉回可见状态；窗口对象丢失时重建，避免“有进程没界面”
+function focusExistingWindow() {
+  if (!appState) return;
+  if (currentMode === 'mini') {
+    setWindowMode('compact');
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow(appState.mainMode);
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.moveTop();
+}
+
+// 单实例锁：星空动画持续占用 GPU，重复启动会让占用成倍叠加，必须拦住
+function bindSingleInstance() {
+  app.on('second-instance', () => focusExistingWindow());
 }
 
 // 某些 Windows 环境下 app.getPath('localAppData') 即使 ready 后也会抛错，
@@ -143,6 +149,363 @@ function removeMarkImage(name) {
   } catch (e) {
     console.error('删除印痕图片失败:', e);
   }
+}
+
+// ---------- 备份快照与恢复 ----------
+// format 2：在 1 的基础上带上印痕图片与完整专注状态，可在全新设备上原样还原
+const BACKUP_FORMAT = 2;
+
+function collectMarkImages(marks) {
+  const images = {};
+  Object.values(marks || {}).forEach((mark) => {
+    const file = mark && typeof mark.image === 'string' ? mark.image : '';
+    if (!file || images[file]) return;
+    try {
+      const p = markFilePath(file);
+      if (fs.existsSync(p)) {
+        images[file] = { mime: 'image/jpeg', data: fs.readFileSync(p).toString('base64') };
+      }
+    } catch (e) {
+      console.error('读取印痕图片失败:', file, e);
+    }
+  });
+  return images;
+}
+
+function buildBackupPayload() {
+  const marks = readJsonSafe(MARKS_FILE) || {};
+  return {
+    app: 'Starry Flow',
+    format: BACKUP_FORMAT,
+    version: app.getVersion(),
+    exported_at: new Date().toISOString(),
+    focus: readJsonSafe(FOCUS_FILE),
+    settings: readJsonSafe(SETTINGS_FILE),
+    marks,
+    marksImages: collectMarkImages(marks),
+    achievements: readJsonSafe(ACHIEVEMENTS_FILE)
+  };
+}
+
+// 本地导入与云端恢复共用：写入文件 + 让采集端整体替换专注数据
+function applyBackupPayload(raw) {
+  const obj = raw && typeof raw === 'object' ? raw : {};
+  const focus = obj.focus || (obj.cumulative_points !== undefined ? obj : null);
+  if (!focus || focus.cumulative_points === undefined) {
+    return { ok: false, error: '不是有效的备份文件' };
+  }
+  if (obj.settings && typeof obj.settings === 'object') {
+    writeJsonSafe(SETTINGS_FILE, obj.settings);
+  }
+  if (obj.marks && typeof obj.marks === 'object') {
+    writeJsonSafe(MARKS_FILE, obj.marks);
+  }
+  // 旧备份没有成就存档，存在时才覆盖，避免清空已有纪念章
+  if (obj.achievements && typeof obj.achievements === 'object') {
+    writeJsonSafe(ACHIEVEMENTS_FILE, obj.achievements);
+  }
+  const images = obj.marksImages && typeof obj.marksImages === 'object' ? obj.marksImages : {};
+  let imageCount = 0;
+  if (Object.keys(images).length) {
+    ensureMarksDir();
+    Object.entries(images).forEach(([file, item]) => {
+      try {
+        const data = item && typeof item === 'object' ? item.data : item;
+        if (typeof data !== 'string' || !data) return;
+        fs.writeFileSync(markFilePath(file), Buffer.from(data, 'base64'));
+        imageCount += 1;
+      } catch (e) {
+        console.error('写入印痕图片失败:', file, e);
+      }
+    });
+  }
+  enqueueFocusCommand('import', { data: focus });
+  return {
+    ok: true,
+    settings: readJsonSafe(SETTINGS_FILE),
+    summary: {
+      days: Object.keys(focus.days || {}).length,
+      cumulative: focus.cumulative_points,
+      images: imageCount
+    }
+  };
+}
+
+// ---------- WebDAV 云备份 ----------
+const WEBDAV_TIMEOUT = 15000;
+const DAV_PROPFIND_0 = '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>';
+const DAV_PROPFIND_1 = '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>';
+
+function webdavStorePath() {
+  return path.join(BASE_DIR, 'webdav.json');
+}
+
+function readWebdavConfig() {
+  const saved = readJsonSafe(webdavStorePath()) || {};
+  let password = '';
+  try {
+    if (typeof saved.password === 'string' && saved.password) {
+      const buf = Buffer.from(saved.password, 'base64');
+      password = saved.encrypted ? safeStorage.decryptString(buf) : buf.toString('utf-8');
+    }
+  } catch (e) {
+    console.error('读取 WebDAV 密码失败:', e);
+    password = '';
+  }
+  return {
+    url: typeof saved.url === 'string' ? saved.url : '',
+    username: typeof saved.username === 'string' ? saved.username : '',
+    password
+  };
+}
+
+// 密码用系统凭据加密（Windows 走 DPAPI）；传空字符串表示沿用已保存的密码
+function saveWebdavConfig(patch) {
+  const prev = readWebdavConfig();
+  const src = patch && typeof patch === 'object' ? patch : {};
+  const next = {
+    url: typeof src.url === 'string' ? src.url.trim() : prev.url,
+    username: typeof src.username === 'string' ? src.username.trim() : prev.username,
+    password: typeof src.password === 'string' && src.password ? src.password : prev.password
+  };
+  let encrypted = false;
+  let password = '';
+  if (next.password) {
+    try {
+      if (safeStorage.isEncryptionAvailable()) {
+        password = safeStorage.encryptString(next.password).toString('base64');
+        encrypted = true;
+      } else {
+        password = Buffer.from(next.password, 'utf-8').toString('base64');
+      }
+    } catch (e) {
+      console.error('加密 WebDAV 密码失败:', e);
+      password = Buffer.from(next.password, 'utf-8').toString('base64');
+      encrypted = false;
+    }
+  }
+  writeJsonSafe(webdavStorePath(), {
+    url: next.url,
+    username: next.username,
+    password,
+    encrypted,
+    updated_at: new Date().toISOString()
+  });
+  return next;
+}
+
+function davParseUrl(cfg) {
+  const raw = String((cfg && cfg.url) || '').trim();
+  if (!/^https?:\/\//i.test(raw)) return null;
+  try {
+    const u = new URL(raw);
+    if (!u.pathname.endsWith('/')) u.pathname = `${u.pathname}/`;
+    u.search = '';
+    u.hash = '';
+    return u;
+  } catch (e) {
+    return null;
+  }
+}
+
+function davBaseUrl(cfg) {
+  const u = davParseUrl(cfg);
+  return u ? u.toString() : '';
+}
+
+// 备份目录：地址只到 WebDAV 挂载点（如坚果云 /dav/）时，统一放进 StarryFlow 子文件夹，
+// 因为部分服务不允许直接在挂载点根目录创建文件（PUT 会返回 404）；地址里已经写了文件夹则直接使用
+function davBackupDirectory(cfg) {
+  const u = davParseUrl(cfg);
+  if (!u) return { url: '', auto: false };
+  const depth = u.pathname.split('/').filter(Boolean).length;
+  if (depth <= 1) {
+    u.pathname = `${u.pathname}StarryFlow/`;
+    return { url: u.toString(), auto: true };
+  }
+  return { url: u.toString(), auto: false };
+}
+
+function davDirFileUrl(dirUrl, name) {
+  try {
+    const u = new URL(dirUrl);
+    u.pathname = `${u.pathname}${encodeURIComponent(name)}`;
+    return u.toString();
+  } catch (e) {
+    return '';
+  }
+}
+
+// 从 WebDAV 的错误 XML 里提取可读原因，避免把整段 XML 丢给用户
+function davServerHint(body) {
+  const text = String(body || '');
+  const m = text.match(/<(?:[A-Za-z0-9_-]+:)?exception>([^<]+)<\/(?:[A-Za-z0-9_-]+:)?exception>/i);
+  if (m) return m[1].trim().slice(0, 120);
+  return text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+function davValidate(cfg) {
+  if (!davBaseUrl(cfg)) return '请填写以 http:// 或 https:// 开头的 WebDAV 地址';
+  if (!cfg.username) return '请填写账号';
+  if (!cfg.password) return '请填写密码（坚果云需使用应用密码）';
+  return '';
+}
+
+function davSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 503/429 多为服务端临时限流，等一会儿重试一次；网络抖动也重试一次
+async function davRequest(cfg, target, options = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), WEBDAV_TIMEOUT);
+    try {
+      const res = await fetch(target, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${cfg.username}:${cfg.password}`, 'utf-8').toString('base64')}`,
+          // 部分 WebDAV 服务会拒绝没有标识的客户端
+          'User-Agent': `StarryFlow/${app.getVersion()} (Windows; WebDAV)`,
+          ...(options.headers || {})
+        }
+      });
+      if ((res.status === 503 || res.status === 429) && attempt === 0) {
+        try { await res.text(); } catch (e) { /* 丢弃响应体 */ }
+        await davSleep(1200);
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastError = e;
+      if (attempt === 0) {
+        await davSleep(800);
+        continue;
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error('WebDAV 请求失败');
+}
+
+async function davCall(cfg, target, options) {
+  try {
+    return { res: await davRequest(cfg, target, options) };
+  } catch (e) {
+    return {
+      error: e && e.name === 'AbortError'
+        ? '连接超时，请检查地址与网络'
+        : `无法连接 WebDAV：${e && e.message ? e.message : e}`
+    };
+  }
+}
+
+function davStatusText(status) {
+  if (status === 401) return '账号或密码不正确（坚果云请使用「应用密码」）';
+  if (status === 403) return '账号没有该目录的访问权限';
+  if (status === 404) return '云端路径不存在（坚果云地址应为 https://dav.jianguoyun.com/dav/）';
+  if (status === 405) return '服务器不支持该操作（可能未开启 WebDAV）';
+  if (status === 409) return '云端目录不存在且无法自动创建';
+  if (status === 429) return '请求过于频繁，云端已限流，请稍后再试';
+  if (status === 503) return '云端暂时不可用（HTTP 503），请稍后重试；坚果云可能触发了请求频率限制';
+  if (status === 507) return '云端空间不足';
+  return `云端返回 HTTP ${status}`;
+}
+
+// 探测目录是否真实存在：部分服务对不存在的目录也返回 207，必须检查响应里有没有 response 节点
+async function davProbeCollection(cfg, target) {
+  const { res, error } = await davCall(cfg, target, {
+    method: 'PROPFIND',
+    headers: { Depth: '0', 'Content-Type': 'application/xml; charset=utf-8' },
+    body: DAV_PROPFIND_0
+  });
+  if (error) return { error };
+  if (!res.ok) return { status: res.status };
+  const text = await res.text();
+  return {
+    status: res.status,
+    ok: /<(?:[A-Za-z0-9_-]+:)?response\b/i.test(text)
+  };
+}
+
+// 逐级 MKCOL：父级已存在才能建下一级，已存在的目录返回 405，直接忽略
+// 第一段是 WebDAV 挂载点（坚果云为 /dav/），由服务商提供；不向它发 MKCOL，
+// 因为部分服务对挂载点执行 MKCOL 会返回 503，导致误判为“云端不可用”
+async function davCreateCollectionChain(cfg, base) {
+  const u = new URL(base);
+  const segments = u.pathname.split('/').filter(Boolean);
+  const start = segments.length > 1 ? 1 : 0;
+  let path = start === 0 ? '' : `/${segments[0]}`;
+  for (let i = start; i < segments.length; i += 1) {
+    path += `/${segments[i]}`;
+    const target = `${u.origin}${path}/`;
+    let { res, error } = await davCall(cfg, target, { method: 'MKCOL' });
+    if (error) return { error };
+    if (res.status === 503) {
+      // 限流时多等一会儿再试一次
+      await davSleep(1500);
+      ({ res, error } = await davCall(cfg, target, { method: 'MKCOL' }));
+      if (error) return { error };
+    }
+    // 201 创建成功；405 已存在；409/403 交给调用方复查判断
+    if (![200, 201, 204, 405, 409].includes(res.status) && res.status !== 403) {
+      return { error: `无法创建云端文件夹（${target}）：${davStatusText(res.status)}` };
+    }
+  }
+  return { ok: true };
+}
+
+// 目录不存在时自动创建并复查；已存在返回 created=false
+async function davEnsureCollection(cfg, base) {
+  const first = await davProbeCollection(cfg, base);
+  if (first.error) return { error: first.error };
+  if (first.ok) return { ok: true, created: false };
+  // 401/403/5xx 才是真正的失败；404 或「207 但没有 response 节点」都按目录缺失处理
+  if (first.status && (first.status === 401 || first.status === 403 || first.status >= 500)) {
+    return { error: davStatusText(first.status) };
+  }
+
+  const created = await davCreateCollectionChain(cfg, base);
+  if (created.error) return { error: created.error };
+
+  const again = await davProbeCollection(cfg, base);
+  if (again.error) return { error: again.error };
+  if (again.ok) return { ok: true, created: true };
+  return { error: '云端目录不存在且无法自动创建，请检查地址中的文件夹名与账号权限' };
+}
+
+function backupStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function parseDavList(xml) {
+  const blocks = String(xml).match(/<(?:[A-Za-z0-9_-]+:)?response\b[\s\S]*?<\/(?:[A-Za-z0-9_-]+:)?response>/gi) || [];
+  const items = [];
+  const seen = new Set();
+  blocks.forEach((block) => {
+    const hrefMatch = block.match(/<(?:[A-Za-z0-9_-]+:)?href>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?href>/i);
+    if (!hrefMatch) return;
+    let href = hrefMatch[1].trim();
+    try { href = decodeURIComponent(href); } catch (e) { /* 保留原值 */ }
+    if (href.endsWith('/')) return;
+    const name = href.split('/').pop();
+    if (!/^StarryFlow-backup-[0-9A-Za-z._-]+\.json$/i.test(name) || seen.has(name)) return;
+    seen.add(name);
+    const sizeMatch = block.match(/<(?:[A-Za-z0-9_-]+:)?getcontentlength>(\d+)<\//i);
+    const modMatch = block.match(/<(?:[A-Za-z0-9_-]+:)?getlastmodified>([^<]+)<\//i);
+    items.push({
+      name,
+      size: sizeMatch ? Number(sizeMatch[1]) : 0,
+      modified: modMatch ? modMatch[1] : ''
+    });
+  });
+  return items.sort((a, b) => (a.name < b.name ? 1 : -1));
 }
 
 // ---------- 专注模块采集端 ----------
@@ -550,7 +913,15 @@ function createWindow(mode) {
   appState.mainMode = mainMode;
   if (!compact && appState.classic && appState.classic.maximized) win.maximize();
 
+  // 渲染层异常时 ready-to-show 可能永远不来，兜底 3 秒后照样把窗口显示出来
+  const showFallback = setTimeout(() => {
+    if (!win.isDestroyed() && currentMode !== 'mini' && !win.isVisible()) {
+      bootLog('ready-to-show 超时，兜底显示窗口');
+      win.show();
+    }
+  }, 3000);
   win.once('ready-to-show', () => {
+    clearTimeout(showFallback);
     if (win.isDestroyed()) return;
     if (currentMode === 'mini') win.hide();
     else win.show();
@@ -591,8 +962,7 @@ function createWindow(mode) {
   win.on('unresponsive', () => bootLog('窗口无响应'));
 }
 
-app.whenReady().then(() => {
-  if (!gotSingleInstanceLock) return;
+function bootstrap() {
   initPaths();
   ensureDataDir();
 
@@ -930,17 +1300,16 @@ app.whenReady().then(() => {
     });
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
     try {
-      const payload = {
-        app: 'Starry Flow',
-        version: '0.1.0',
-        exported_at: new Date().toISOString(),
-        focus: readJsonSafe(FOCUS_FILE),
-        settings: readJsonSafe(SETTINGS_FILE),
-        marks: readJsonSafe(MARKS_FILE),
-        achievements: readJsonSafe(ACHIEVEMENTS_FILE)
-      };
+      const payload = buildBackupPayload();
       fs.writeFileSync(res.filePath, JSON.stringify(payload, null, 2), 'utf-8');
-      return { ok: true, path: res.filePath };
+      return {
+        ok: true,
+        path: res.filePath,
+        summary: {
+          images: Object.keys(payload.marksImages || {}).length,
+          cumulative: payload.focus ? payload.focus.cumulative_points : 0
+        }
+      };
     } catch (e) {
       console.error('导出备份失败:', e);
       return { ok: false, error: String(e) };
@@ -958,33 +1327,128 @@ app.whenReady().then(() => {
     }
     try {
       const raw = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf-8'));
-      const focus = raw.focus || (raw.cumulative_points !== undefined ? raw : null);
-      if (!focus || focus.cumulative_points === undefined) {
-        return { ok: false, error: '不是有效的备份文件' };
-      }
-      if (raw.settings && typeof raw.settings === 'object') {
-        writeJsonSafe(SETTINGS_FILE, raw.settings);
-      }
-      if (raw.marks && typeof raw.marks === 'object') {
-        writeJsonSafe(MARKS_FILE, raw.marks);
-      }
-      // 旧备份没有成就存档，存在时才覆盖，避免清空已有纪念章
-      if (raw.achievements && typeof raw.achievements === 'object') {
-        writeJsonSafe(ACHIEVEMENTS_FILE, raw.achievements);
-      }
-      enqueueFocusCommand('import', { data: focus });
-      return {
-        ok: true,
-        settings: readJsonSafe(SETTINGS_FILE),
-        summary: {
-          days: Object.keys(focus.days || {}).length,
-          cumulative: focus.cumulative_points
-        }
-      };
+      return applyBackupPayload(raw);
     } catch (e) {
       console.error('导入备份失败:', e);
       return { ok: false, error: String(e) };
     }
+  });
+
+  // ---------- WebDAV 云备份：测试 / 上传 / 列表 / 恢复 ----------
+  ipcMain.handle('webdav:get', () => {
+    const cfg = readWebdavConfig();
+    return { url: cfg.url, username: cfg.username, hasPassword: Boolean(cfg.password) };
+  });
+
+  ipcMain.handle('webdav:test', async (_event, patch) => {
+    const cfg = saveWebdavConfig(patch);
+    const invalid = davValidate(cfg);
+    if (invalid) return { ok: false, error: invalid };
+    // 测试只做探测，不建目录：避免在用户只是验证连接时反复触发 MKCOL 与限流
+    const dir = davBackupDirectory(cfg);
+    const probe = await davProbeCollection(cfg, dir.url);
+    if (probe.error) return { ok: false, error: probe.error };
+    if (!probe.ok) {
+      if (probe.status && probe.status !== 404 && probe.status !== 207) {
+        return { ok: false, error: davStatusText(probe.status) };
+      }
+      return {
+        ok: true,
+        folderMissing: true,
+        message: dir.auto
+          ? '连接成功，备份将保存在 StarryFlow 子文件夹（上传时自动创建）'
+          : '连接成功，但目标文件夹尚不存在（上传时会自动创建）'
+      };
+    }
+    return {
+      ok: true,
+      message: `连接成功（HTTP ${probe.status}）${dir.auto ? '，备份保存在 StarryFlow 子文件夹' : ''}`
+    };
+  });
+
+  ipcMain.handle('webdav:upload', async (_event, patch) => {
+    const cfg = saveWebdavConfig(patch);
+    const invalid = davValidate(cfg);
+    if (invalid) return { ok: false, error: invalid };
+    // 先把目标目录确保好：目录刚创建、服务端还没同步时直接 PUT 会返回 404
+    const dir = davBackupDirectory(cfg);
+    const ensured = await davEnsureCollection(cfg, dir.url);
+    if (ensured.error) return { ok: false, error: ensured.error };
+
+    const payload = buildBackupPayload();
+    const body = JSON.stringify(payload, null, 2);
+    const name = `StarryFlow-backup-${backupStamp()}.json`;
+    const target = davDirFileUrl(dir.url, name);
+    const put = () => davCall(cfg, target, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body
+    });
+    let { res, error } = await put();
+    if (error) return { ok: false, error };
+    if (res.status === 404 || res.status === 409) {
+      // 有些服务对不存在的目录也回 207，导致探测误判为“已存在”；
+      // 这里强制补建一次目录，等待同步后再重试写入
+      const forced = await davCreateCollectionChain(cfg, dir.url);
+      if (forced.error) return { ok: false, error: forced.error };
+      await new Promise((r) => setTimeout(r, 800));
+      ({ res, error } = await put());
+      if (error) return { ok: false, error };
+    }
+    if (!res.ok) {
+      let detail = '';
+      try { detail = davServerHint(await res.text()); } catch (e) { /* 忽略 */ }
+      return {
+        ok: false,
+        error: `${davStatusText(res.status)} · 请求地址 ${target}${detail ? ` · 服务端返回 ${detail}` : ''}`
+      };
+    }
+    return {
+      ok: true,
+      name,
+      message: `已上传云端备份：${name}（${(Buffer.byteLength(body) / 1024 / 1024).toFixed(2)} MB）`
+    };
+  });
+
+  ipcMain.handle('webdav:list', async (_event, patch) => {
+    const cfg = patch ? saveWebdavConfig(patch) : readWebdavConfig();
+    const invalid = davValidate(cfg);
+    if (invalid) return { ok: false, error: invalid };
+    const dir = davBackupDirectory(cfg);
+    const { res, error } = await davCall(cfg, dir.url, {
+      method: 'PROPFIND',
+      headers: { Depth: '1', 'Content-Type': 'application/xml; charset=utf-8' },
+      body: DAV_PROPFIND_1
+    });
+    if (error) return { ok: false, error };
+    // 目录还没建过时视为“暂无备份”，不当作错误
+    if (res.status === 404) return { ok: true, items: [], missing: true };
+    if (!res.ok) return { ok: false, error: davStatusText(res.status) };
+    return { ok: true, items: parseDavList(await res.text()), folder: dir.auto ? 'StarryFlow' : '' };
+  });
+
+  ipcMain.handle('webdav:restore', async (_event, name) => {
+    const safeName = String(name || '');
+    if (!/^StarryFlow-backup-[0-9A-Za-z._-]+\.json$/.test(safeName)) {
+      return { ok: false, error: '备份文件名无效' };
+    }
+    const cfg = readWebdavConfig();
+    const invalid = davValidate(cfg);
+    if (invalid) return { ok: false, error: invalid };
+    const { res, error } = await davCall(cfg, davDirFileUrl(davBackupDirectory(cfg).url, safeName), {
+      method: 'GET'
+    });
+    if (error) return { ok: false, error };
+    if (!res.ok) return { ok: false, error: davStatusText(res.status) };
+    let raw;
+    try {
+      raw = JSON.parse(await res.text());
+    } catch (e) {
+      return { ok: false, error: '云端文件不是有效的备份 JSON' };
+    }
+    const result = applyBackupPayload(raw);
+    if (result.ok) result.name = safeName;
+    return result;
   });
 
   // 恢复上次的模式：经典 / 极简直接打开主窗口，迷你则隐藏主窗口只显示迷你窗
@@ -1005,7 +1469,7 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow(appState.mainMode);
   });
-});
+}
 
 app.on('window-all-closed', () => {
   bootLog('window-all-closed 触发');
@@ -1021,3 +1485,27 @@ app.on('before-quit', () => {
   bootLog('before-quit 触发');
   stopMonitor();
 });
+
+// ---------- 启动 ----------
+// 上一次退出时，Electron 主进程、GPU 子进程与 Python 采集端需要一点时间才会真正结束，
+// 这期间 requestSingleInstanceLock() 会失败。老逻辑直接 quit，就表现为“双击没反应、任务管理器里有进程”。
+// 这里在锁被占用时短暂重试，旧进程退净后由本次启动接管。
+const initialLock = app.requestSingleInstanceLock();
+if (initialLock) {
+  bindSingleInstance();
+  app.whenReady().then(bootstrap);
+} else {
+  const deadline = Date.now() + 6000;
+  const retry = setInterval(() => {
+    if (app.requestSingleInstanceLock()) {
+      clearInterval(retry);
+      bindSingleInstance();
+      app.whenReady().then(bootstrap);
+      return;
+    }
+    if (Date.now() >= deadline) {
+      clearInterval(retry);
+      app.quit();
+    }
+  }, 250);
+}

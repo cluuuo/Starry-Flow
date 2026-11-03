@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { minutesToTimeStr, timeStrToMinutes, DEFAULT_SETTINGS, tierBrightness, tierGlow, tierHex, hsvToHex } from '../lib/logic';
 import WhitelistPicker from './WhitelistPicker';
+import WebdavPanel from './WebdavPanel';
 
 const SHAPES = [
   { id: 'star4', label: '四芒星' },
@@ -27,6 +28,7 @@ export default function SettingsWindow({
   onFocusCommand,
   onBackupExport,
   onBackupImport,
+  onWebdavRestored,
   storageInfo,
   onRefreshStorage,
   onOpenStorage,
@@ -1113,8 +1115,8 @@ export default function SettingsWindow({
                   <button className="settings-reset-mini" onClick={resetPact}>恢复默认</button>
                 </div>
                 <p className="settings-desc">
-                  开启后在星图上点击未来日期的星点，为那一天立下积分目标。
-                  当天达成目标会获得额外积分，未达到判定比例则产生等额赤字积分，需要从当日累计中偿还。
+                  开启后在星图上点击今天或未来日期的星点，为那一天立下积分目标。
+                  达成目标会获得额外积分；日期过后仍未达到判定比例，则产生与目标等额的赤字积分，需要从当日累计中偿还。
                 </p>
 
                 <div className="field-row">
@@ -1261,7 +1263,7 @@ export default function SettingsWindow({
               <div className="settings-section settings-wide">
                 <div className="settings-title">备份与恢复</div>
                 <p className="settings-desc">
-                  备份包含专注数据、积分历史、规则与界面设置。导入会整体替换当前数据，印痕图片不包含在备份内，需要另行复制图片文件夹。
+                  备份包含积分与专注数据、对赌与赤字、成就、全部设置，以及印痕文字和图片，可在新设备上完整还原。导入会整体替换当前数据。
                 </p>
                 <div className="backup-buttons">
                   <button className="settings-action" disabled={backupBusy} onClick={handleExport}>
@@ -1275,6 +1277,8 @@ export default function SettingsWindow({
                   <div className={`backup-msg ${backupMsg.ok ? 'ok' : 'fail'}`}>{backupMsg.text}</div>
                 )}
               </div>
+
+              <WebdavPanel onRestored={onWebdavRestored} />
             </div>
           )}
           </div>

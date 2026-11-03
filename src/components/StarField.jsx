@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import ContextMenu from './ContextMenu';
 import {
   toDateKey,
   parseDateKey,
@@ -249,6 +250,8 @@ export default function StarField({
   onPactDay
 }) {
   const [tip, setTip] = useState(null);
+  // 今天既是「写印痕」又是「立对赌」的候选，单点无法区分，用一个小菜单让用户选
+  const [todayMenu, setTodayMenu] = useState(null);
   const { starShape, starColor, starMotion } = settings;
 
   const { rows, dayNumber } = useMemo(() => {
@@ -289,16 +292,26 @@ export default function StarField({
               const lit = level >= 0;
               const hasMark = Boolean(marks && marks[cell.key]);
               const hasPact = Boolean(pacts && pacts[cell.key] && pacts[cell.key].status === 'pending');
-              // 已点亮的过去日期用于写印痕；未来未点亮的星点在开启对赌后可点击设目标
+              // 已点亮的过去日期用于写印痕；今天与未来未点亮的星点在开启对赌后可点击设目标
               const markTarget = lit && !cell.isFuture && Boolean(onSelectDay);
-              const pactTarget = cell.isFuture && !lit && pactEnabled && Boolean(onPactDay);
-              const clickable = markTarget || pactTarget;
+              const pactTarget = !lit && (cell.isFuture || cell.isToday) && pactEnabled && Boolean(onPactDay);
+              // 今天已点亮时两种操作都成立，点击弹出选择菜单
+              const todayBoth = cell.isToday && lit && pactEnabled && Boolean(onPactDay);
+              const clickable = markTarget || pactTarget || todayBoth;
 
               return (
                 <div
                   key={cell.key}
                   className={`star-slot ${clickable ? 'is-clickable' : ''} ${pactTarget ? 'is-pact-target' : ''}`}
-                  onClick={clickable ? () => (pactTarget ? onPactDay(cell.key) : onSelectDay(cell.key)) : undefined}
+                  onClick={clickable ? (e) => {
+                    if (todayBoth) {
+                      setTodayMenu({ key: cell.key, x: e.clientX, y: e.clientY });
+                    } else if (pactTarget) {
+                      onPactDay(cell.key);
+                    } else {
+                      onSelectDay(cell.key);
+                    }
+                  } : undefined}
                   onMouseEnter={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     setTip({
@@ -312,6 +325,7 @@ export default function StarField({
                       hasMark,
                       hasPact,
                       pactTarget,
+                      todayBoth,
                       clickable
                     });
                   }}
@@ -369,10 +383,24 @@ export default function StarField({
           {tip.hasPact && <div className="tip-pact">已立下对赌</div>}
           {tip.clickable && (
             <div className="tip-hint">
-              {tip.pactTarget ? '点击设置对赌' : (tip.hasMark ? '点击查看印痕' : '点击写下印痕')}
+              {tip.todayBoth
+                ? '点击查看印痕或立下对赌'
+                : tip.pactTarget ? '点击设置对赌' : (tip.hasMark ? '点击查看印痕' : '点击写下印痕')}
             </div>
           )}
         </div>
+      )}
+
+      {todayMenu && (
+        <ContextMenu
+          x={todayMenu.x}
+          y={todayMenu.y}
+          items={[
+            { label: '写下今日印痕', onClick: () => onSelectDay(todayMenu.key) },
+            { label: '为今天立下对赌', onClick: () => onPactDay(todayMenu.key) }
+          ]}
+          onClose={() => setTodayMenu(null)}
+        />
       )}
     </div>
   );
