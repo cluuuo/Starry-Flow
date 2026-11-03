@@ -77,7 +77,11 @@ export const DEFAULT_SETTINGS = {
   psychology: {              // 心理学模型：健康就寝与对赌协议
     healthySleep: {
       enabled: false,
-      bedtimeMinutes: 23 * 60 + 30,  // 健康就寝时间，到点后积分速度降为下面两档
+      // 就寝时间段：起止各自可选「当日(0) / 次日(1)」，可跨日
+      startDay: 0,
+      startMinutes: 23 * 60 + 30,
+      endDay: 1,
+      endMinutes: 7 * 60,
       normalSpeed: 1,
       strictSpeed: 2
     },
@@ -170,7 +174,7 @@ export function mergeSettings(saved) {
     : (Number.isFinite(rawDuration) ? durationToLevel(rawDuration) : base.sky.flowSpeed);
   delete out.sky.baseDuration;
   out.background = { ...base.background, ...(saved.background || {}) };
-  out.psychology = mergePsychology(saved.psychology);
+  out.psychology = mergePsychology(saved.psychology, out.dayStartMinutes);
   out.specialWhitelist = mergeSpecialWhitelist(saved.specialWhitelist);
   out.settingsTab = ['rules', 'backup', 'psychology'].includes(saved.settingsTab) ? saved.settingsTab : 'appearance';
   const rawMax = Number(saved.maxWorkGroups);
@@ -226,7 +230,7 @@ function mergeSpecialWhitelist(raw) {
 }
 
 // 心理学模型：范围与步进校验，缺失字段用默认值补齐
-function mergePsychology(raw) {
+function mergePsychology(raw, dayStartMinutes = 420) {
   const base = DEFAULT_SETTINGS.psychology;
   const src = raw && typeof raw === 'object' ? raw : {};
   const sleep = src.healthySleep && typeof src.healthySleep === 'object' ? src.healthySleep : {};
@@ -238,10 +242,30 @@ function mergePsychology(raw) {
   };
   const step5 = (value, min, max, fallback) => Math.round(clampNum(value, min, max, fallback) / 5) * 5;
 
+  // 新版用 start/end 时间段；旧版只有 bedtimeMinutes，按「bedtime → 逻辑日切点」迁移
+  const hasRange = typeof sleep.startMinutes === 'number' || typeof sleep.endMinutes === 'number';
+  const dayStart = Math.round(clampNum(dayStartMinutes, 0, 1439, 420));
+  const legacyStart = sleep.bedtimeMinutes;
+  const startMinutes = Math.round(clampNum(
+    hasRange ? sleep.startMinutes : legacyStart,
+    0, 1439,
+    base.healthySleep.startMinutes
+  ));
+  const startDay = hasRange && Number(sleep.startDay) === 1 ? 1 : 0;
+  // 旧数据：结束点就是逻辑日切点；早于开始点说明跨到了次日
+  const endMinutes = hasRange
+    ? Math.round(clampNum(sleep.endMinutes, 0, 1439, base.healthySleep.endMinutes))
+    : dayStart;
+  const endDay = hasRange
+    ? (Number(sleep.endDay) === 0 ? 0 : 1)
+    : (dayStart < startMinutes ? 1 : 0);
   return {
     healthySleep: {
       enabled: sleep.enabled === true,
-      bedtimeMinutes: Math.round(clampNum(sleep.bedtimeMinutes, 0, 1439, base.healthySleep.bedtimeMinutes)),
+      startDay,
+      startMinutes,
+      endDay,
+      endMinutes,
       normalSpeed: Math.max(1, Math.round(clampNum(sleep.normalSpeed, 1, 999, base.healthySleep.normalSpeed))),
       strictSpeed: Math.max(1, Math.round(clampNum(sleep.strictSpeed, 1, 999, base.healthySleep.strictSpeed)))
     },

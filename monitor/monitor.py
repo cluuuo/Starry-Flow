@@ -74,6 +74,10 @@ def default_data():
         "focus_lost": False,
         "streak_seconds": 0,
         "current_speed": 0,
+        # 诊断：本轮焦点判定的结果与前台进程，便于排查“选中的进程被当成白名单”
+        "focus_reason": "",
+        "fg_pid": None,
+        "fg_name": "",
         "penalty_active": False,
         "warn_message": None,
         "processes": [],
@@ -99,7 +103,11 @@ def default_psychology():
     return {
         "healthySleep": {
             "enabled": False,
-            "bedtimeMinutes": 23 * 60 + 30,
+            # 就寝时间段：起止各自可选当日(0)/次日(1)，可跨日
+            "startDay": 0,
+            "startMinutes": 23 * 60 + 30,
+            "endDay": 1,
+            "endMinutes": 7 * 60,
             "normalSpeed": 1,
             "strictSpeed": 2
         },
@@ -111,7 +119,7 @@ def default_psychology():
     }
 
 
-def sanitize_psychology(raw):
+def sanitize_psychology(raw, day_start_minutes=None):
     """外部设置只接受约定结构，范围与步进与界面一致。"""
     base = default_psychology()
     src = raw if isinstance(raw, dict) else {}
@@ -128,12 +136,29 @@ def sanitize_psychology(raw):
 
     ratio = int(round(clamp(pact.get("ratio"), 50, 100, base["pact"]["ratio"]) / 5.0) * 5)
     reward = int(round(clamp(pact.get("reward"), 50, 150, base["pact"]["reward"]) / 5.0) * 5)
+    default_sleep = base["healthySleep"]
+    day_start = int(max(0, min(1439, num(day_start_minutes, 7 * 60))))
+    has_range = isinstance(sleep.get("startMinutes"), (int, float)) or isinstance(sleep.get("endMinutes"), (int, float))
+    if has_range:
+        start_min = int(round(clamp(sleep.get("startMinutes"), 0, 1439, default_sleep["startMinutes"])))
+        start_day = 1 if sleep.get("startDay") == 1 else 0
+        end_min = int(round(clamp(sleep.get("endMinutes"), 0, 1439, default_sleep["endMinutes"])))
+        end_day = 0 if sleep.get("endDay") == 0 else 1
+    else:
+        # 旧版只有 bedtimeMinutes：结束点就是逻辑日切点，早于开始点表示跨到次日
+        start_min = int(round(clamp(sleep.get("bedtimeMinutes"), 0, 1439, default_sleep["startMinutes"])))
+        start_day = 0
+        end_min = day_start
+        end_day = 1 if day_start < start_min else 0
     return {
         "healthySleep": {
             "enabled": sleep.get("enabled") is True,
-            "bedtimeMinutes": int(round(clamp(sleep.get("bedtimeMinutes"), 0, 1439, base["healthySleep"]["bedtimeMinutes"]))),
-            "normalSpeed": max(1, int(round(clamp(sleep.get("normalSpeed"), 1, 999, base["healthySleep"]["normalSpeed"])))),
-            "strictSpeed": max(1, int(round(clamp(sleep.get("strictSpeed"), 1, 999, base["healthySleep"]["strictSpeed"]))))
+            "startDay": start_day,
+            "startMinutes": start_min,
+            "endDay": end_day,
+            "endMinutes": end_min,
+            "normalSpeed": max(1, int(round(clamp(sleep.get("normalSpeed"), 1, 999, default_sleep["normalSpeed"])))),
+            "strictSpeed": max(1, int(round(clamp(sleep.get("strictSpeed"), 1, 999, default_sleep["strictSpeed"]))))
         },
         "pact": {
             "enabled": pact.get("enabled") is True,
@@ -143,11 +168,28 @@ def sanitize_psychology(raw):
     }
 
 
-def in_sleep_window(now, sleep_cfg, day_start_minutes):
-    """就寝时段：从就寝时间起，跨过逻辑日边界直到新一天开始。"""
-    minutes = now.hour * 60 + now.minute
-    bedtime = int(num((sleep_cfg or {}).get("bedtimeMinutes"), 23 * 60 + 30))
-    return minutes >= bedtime or minutes < day_start_minutes
+def in_sleep_window(now, sleep_cfg):
+    """就寝时间段：起止各自带「当日/次日」偏移，支持跨日，例如 当日23:00 - 次日07:00。"""
+    cfg = sleep_cfg or {}
+    start_day = 1 if int(num(cfg.get("startDay"), 0)) == 1 else 0
+    end_day = 1 if int(num(cfg.get("endDay"), 1)) == 1 else 0
+    start_min = int(max(0, min(1439, num(cfg.get("startMinutes"), 23 * 60 + 30))))
+    end_min = int(max(0, min(1439, num(cfg.get("endMinutes"), 7 * 60))))
+    base = datetime.datetime(now.year, now.month, now.day)
+
+    # 以今天和昨天为基准各算一次，覆盖跨日与“次日开始”的时间段
+    for offset in (0, -1):
+        day = base + datetime.timedelta(days=offset)
+        start = day + datetime.timedelta(days=start_day, minutes=start_min)
+        end = day + datetime.timedelta(days=end_day, minutes=end_min)
+        if end == start:
+            # 起止完全相同视为未配置有效时间段，避免误判成全天低速
+            continue
+        if end < start:
+            end += datetime.timedelta(days=1)
+        if start <= now < end:
+            return True
+    return False
 
 
 def clean_pacts(raw):
@@ -330,7 +372,7 @@ def load_data():
                     fresh["days"][k] = max(0, num(v, 0) - already)
             fresh["settlement_version"] = 2
         # 心理学模型相关状态：旧存档缺少时补默认值，避免类型漂移
-        fresh["psychology"] = sanitize_psychology(fresh.get("psychology"))
+        fresh["psychology"] = sanitize_psychology(fresh.get("psychology"), fresh.get("day_start_minutes"))
         fresh["pacts"] = clean_pacts(fresh.get("pacts"))
         fresh["deficit"] = int(max(0, num(fresh.get("deficit"), 0)))
         fresh["counters"] = clean_counters(fresh.get("counters"))
@@ -427,9 +469,7 @@ def effective_speed(data, streak_seconds):
     speed = points_for_second(settings, streak_seconds)
     psych = data.get("psychology") or default_psychology()
     sleep_cfg = psych.get("healthySleep") or {}
-    if sleep_cfg.get("enabled") and in_sleep_window(
-        datetime.datetime.now(), sleep_cfg, int(num(data.get("day_start_minutes"), 7 * 60))
-    ):
+    if sleep_cfg.get("enabled") and in_sleep_window(datetime.datetime.now(), sleep_cfg):
         key = "strictSpeed" if settings["strict"]["enabled"] else "normalSpeed"
         speed = int(max(1, num(sleep_cfg.get(key), speed)))
     return speed
@@ -465,7 +505,17 @@ def sanitize_special_whitelist(raw):
     }
 
 
-def in_special_whitelist(fg_pid, cfg):
+def process_exe_path(pid):
+    """取进程可执行路径；取不到时返回空串，不影响主循环。"""
+    if not pid:
+        return ""
+    try:
+        return str(psutil.Process(int(pid)).exe() or "")
+    except (psutil.Error, ValueError, TypeError, OSError):
+        return ""
+
+
+def in_special_whitelist(fg_pid, cfg, fg_path=None):
     """焦点是否落在特殊白名单进程上；命中后不算偏离但积分降速。"""
     if not cfg.get("enabled") or not cfg.get("items") or not fg_pid:
         return False
@@ -479,9 +529,8 @@ def in_special_whitelist(fg_pid, cfg):
     }
     if not paths:
         return False
-    try:
-        exe = psutil.Process(int(fg_pid)).exe()
-    except (psutil.Error, ValueError, TypeError, OSError):
+    exe = fg_path if fg_path else process_exe_path(fg_pid)
+    if not exe:
         return False
     return os.path.normcase(str(exe)) in paths
 
@@ -652,9 +701,7 @@ def handle_command(data, cmd, key):
         data["warn_message"] = None
         # 健康就寝：就寝时段内点击结算，记一次「乖乖睡觉」纪念章
         sleep_cfg = (data.get("psychology") or default_psychology()).get("healthySleep") or {}
-        if sleep_cfg.get("enabled") and in_sleep_window(
-            datetime.datetime.now(), sleep_cfg, int(num(data.get("day_start_minutes"), 7 * 60))
-        ):
+        if sleep_cfg.get("enabled") and in_sleep_window(datetime.datetime.now(), sleep_cfg):
             counters = data["counters"]
             counters["sleep_settles"] = int(num(counters.get("sleep_settles"), 0)) + 1
         add_notice(data, True, "已存入已结算积分 %d，今日共结算 %d 积分。" % (delta, num(data["settled"].get(key, 0), 0)))
@@ -804,7 +851,7 @@ def handle_command(data, cmd, key):
         data["settled"] = {str(k): num(v, 0) for k, v in (incoming.get("settled") or {}).items()}
         data["history"] = [r for r in (incoming.get("history") or []) if isinstance(r, dict)]
         # 完整恢复：对赌、赤字、事件计数与心理学配置都属于用户状态，缺一项就不算“一模一样”
-        data["psychology"] = sanitize_psychology(incoming.get("psychology"))
+        data["psychology"] = sanitize_psychology(incoming.get("psychology"), incoming.get("day_start_minutes"))
         data["day_start_minutes"] = int(max(0, num(incoming.get("day_start_minutes"), data.get("day_start_minutes") or 7 * 60)))
         data["pacts"] = clean_pacts(incoming.get("pacts"))
         data["deficit"] = int(max(0, num(incoming.get("deficit"), 0)))
@@ -917,13 +964,13 @@ def main():
     shared_now = load_json(SETTINGS_FILE)
     if isinstance(shared_now, dict):
         day_start = max(0, num(shared_now.get("dayStartMinutes"), day_start))
-        psychology = sanitize_psychology(shared_now.get("psychology"))
+        psychology = sanitize_psychology(shared_now.get("psychology"), day_start)
         special_whitelist = sanitize_special_whitelist(shared_now.get("specialWhitelist"))
     data["day_start_minutes"] = day_start
     data["psychology"] = psychology
     data["sleep_active"] = bool(
         psychology["healthySleep"]["enabled"]
-        and in_sleep_window(datetime.datetime.now(), psychology["healthySleep"], day_start)
+        and in_sleep_window(datetime.datetime.now(), psychology["healthySleep"])
     )
     last_process_refresh = 0
     last_mono = time.monotonic()
@@ -946,7 +993,7 @@ def main():
                     day_start = max(0, num(shared.get("dayStartMinutes"), day_start))
                     # 本软件白名单开关由界面写入 settings.json，这里定期刷新
                     self_whitelist = bool(shared.get("selfWhitelist"))
-                    psychology = sanitize_psychology(shared.get("psychology"))
+                    psychology = sanitize_psychology(shared.get("psychology"), day_start)
                     data["psychology"] = psychology
                     special_whitelist = sanitize_special_whitelist(shared.get("specialWhitelist"))
                 data["day_start_minutes"] = day_start
@@ -955,7 +1002,7 @@ def main():
             # 就寝时段内界面提示计时降速
             data["sleep_active"] = bool(
                 psychology["healthySleep"]["enabled"]
-                and in_sleep_window(now, psychology["healthySleep"], day_start)
+                and in_sleep_window(now, psychology["healthySleep"])
             )
             # 特殊白名单命中标记每轮先归零，命中时再置真
             data["special_active"] = False
@@ -976,15 +1023,35 @@ def main():
 
             if data["running"] and data["selected_pids"]:
                 fg_pid = get_foreground_pid()
+                fg_path = process_exe_path(fg_pid)
                 strict = data["settings"]["strict"]
                 selected_ids = {p["pid"] for p in data["selected_pids"]}
-                if fg_pid and fg_pid in selected_ids:
-                    # 焦点命中工作区内任意一个进程都算专注
+                # 除了 PID，也按可执行路径认人：多进程应用、重启后 PID 变化时仍能算回专注
+                selected_paths = {
+                    os.path.normcase(str(p.get("path")))
+                    for p in data["selected_pids"]
+                    if p.get("path")
+                }
+                path_hit = bool(fg_path) and os.path.normcase(fg_path) in selected_paths
+                data["fg_pid"] = fg_pid
+                data["fg_name"] = ""
+                if fg_pid:
+                    try:
+                        data["fg_name"] = psutil.Process(int(fg_pid)).name()
+                    except (psutil.Error, ValueError, TypeError, OSError):
+                        data["fg_name"] = ""
+
+                if fg_pid and (fg_pid in selected_ids or path_hit):
+                    # 焦点命中工作区内任意一个进程都算专注，选择优先于所有白名单
+                    data["focus_reason"] = "selected-path" if path_hit and fg_pid not in selected_ids else "selected"
                     data["focus_lost"] = False
                     data["penalty_active"] = False
                     data["whitelist_paused"] = False
+                    data["special_active"] = False
                     data["warn_message"] = None
                     away_seconds = 0.0
+                    # 分支一进入就更新显示速度，避免界面上短暂停留在上一个白名单速度
+                    data["current_speed"] = effective_speed(data, max(1, data["streak_seconds"]))
                     focus_seconds += delta
                     # 积分仍按整秒结算，循环变快也不会让积分翻倍
                     while focus_seconds >= 1.0:
@@ -995,23 +1062,27 @@ def main():
                         data["days"][key] = num(data["days"].get(key, 0), 0) + speed
                 elif self_whitelist and is_self_window(fg_pid):
                     # 本软件白名单：暂停计时，不算偏离，严格模式也不倒扣
+                    data["focus_reason"] = "self"
                     data["focus_lost"] = False
                     data["penalty_active"] = False
                     data["whitelist_paused"] = True
+                    data["special_active"] = False
                     data["warn_message"] = None
                     focus_seconds = 0.0
                     away_seconds = 0.0
                     data["streak_seconds"] = 0
                     data["current_speed"] = 0
                     data["status"] = "focusing"
-                elif in_special_whitelist(fg_pid, special_whitelist):
+                elif in_special_whitelist(fg_pid, special_whitelist, fg_path):
                     # 特殊白名单：不算偏离，积分照常累积，但按设定速度降速
+                    data["focus_reason"] = "special"
                     data["focus_lost"] = False
                     data["penalty_active"] = False
                     data["whitelist_paused"] = False
                     data["special_active"] = True
                     data["warn_message"] = None
                     away_seconds = 0.0
+                    data["current_speed"] = special_whitelist_speed(data["settings"], special_whitelist)
                     focus_seconds += delta
                     while focus_seconds >= 1.0:
                         focus_seconds -= 1.0
@@ -1021,6 +1092,7 @@ def main():
                         data["days"][key] = num(data["days"].get(key, 0), 0) + speed
                 else:
                     # 不论是否严格模式，只要焦点脱离就标记，界面据此显示警示
+                    data["focus_reason"] = "away"
                     data["whitelist_paused"] = False
                     data["focus_lost"] = True
                     focus_seconds = 0.0
@@ -1040,6 +1112,9 @@ def main():
                         away_seconds = 0.0
                     data["status"] = "focusing"
             else:
+                data["focus_reason"] = "idle"
+                data["fg_pid"] = None
+                data["fg_name"] = ""
                 data["focus_lost"] = False
                 data["whitelist_paused"] = False
                 focus_seconds = 0.0

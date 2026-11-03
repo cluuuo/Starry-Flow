@@ -3105,6 +3105,34 @@ body::before {
   opacity: 0.95;
 }
 
+/* 就寝时间段：日期偏移下拉 + 24 小时时间 */
+.sleep-time-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sleep-day-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sleep-day-select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.sleep-day-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* 开关行：标签与提示并排，开关仍靠右 */
 .field-label-group {
   display: flex;

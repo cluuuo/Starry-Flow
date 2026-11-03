@@ -1041,8 +1041,9 @@ export default function SettingsWindow({
                   <button className="settings-reset-mini" onClick={resetSleep}>恢复默认</button>
                 </div>
                 <p className="settings-desc">
-                  到达设定的就寝时间后，专注积分速度降为下面设定的值，提醒你及时休息，不用熬低效率的夜。
-                  在就寝时间之后结算当日积分，还会获得一枚「乖乖睡觉」纪念章。
+                  在设定的时间段内，专注积分速度降为下面设定的值，提醒你及时休息，不用熬低效率的夜。
+                  起止时间各自可选「当日 / 次日」，因此可以跨日，例如「当日 23:00 – 次日 07:00」。
+                  在该时段内结算当日积分，还会获得一枚「乖乖睡觉」纪念章。
                 </p>
 
                 <div className="field-row">
@@ -1062,18 +1063,63 @@ export default function SettingsWindow({
                 </div>
 
                 <div className="field-row">
-                  <label>就寝时间</label>
-                  <input
-                    type="time"
-                    value={minutesToTimeStr(sleepCfg.bedtimeMinutes)}
-                    disabled={!sleepCfg.enabled}
-                    onChange={(e) => {
-                      const minutes = timeStrToMinutes(e.target.value);
-                      if (Number.isFinite(minutes)) {
-                        updatePsych({ healthySleep: { ...sleepCfg, bedtimeMinutes: minutes } });
-                      }
-                    }}
-                  />
+                  <label>开始时间</label>
+                  <div className="sleep-time-group">
+                    <select
+                      className="sleep-day-select"
+                      value={sleepCfg.startDay}
+                      disabled={!sleepCfg.enabled}
+                      onChange={(e) => updatePsych({
+                        healthySleep: { ...sleepCfg, startDay: Number(e.target.value) }
+                      })}
+                      aria-label="就寝开始日期"
+                    >
+                      <option value={0}>当日</option>
+                      <option value={1}>次日</option>
+                    </select>
+                    <input
+                      type="time"
+                      value={minutesToTimeStr(sleepCfg.startMinutes)}
+                      disabled={!sleepCfg.enabled}
+                      onChange={(e) => {
+                        const minutes = timeStrToMinutes(e.target.value);
+                        if (Number.isFinite(minutes)) {
+                          updatePsych({ healthySleep: { ...sleepCfg, startMinutes: minutes } });
+                        }
+                      }}
+                      aria-label="就寝开始时间"
+                    />
+                  </div>
+                </div>
+
+                <div className="field-row">
+                  <label>结束时间</label>
+                  <div className="sleep-time-group">
+                    <select
+                      className="sleep-day-select"
+                      value={sleepCfg.endDay}
+                      disabled={!sleepCfg.enabled}
+                      onChange={(e) => updatePsych({
+                        healthySleep: { ...sleepCfg, endDay: Number(e.target.value) }
+                      })}
+                      aria-label="就寝结束日期"
+                    >
+                      <option value={0}>当日</option>
+                      <option value={1}>次日</option>
+                    </select>
+                    <input
+                      type="time"
+                      value={minutesToTimeStr(sleepCfg.endMinutes)}
+                      disabled={!sleepCfg.enabled}
+                      onChange={(e) => {
+                        const minutes = timeStrToMinutes(e.target.value);
+                        if (Number.isFinite(minutes)) {
+                          updatePsych({ healthySleep: { ...sleepCfg, endMinutes: minutes } });
+                        }
+                      }}
+                      aria-label="就寝结束时间"
+                    />
+                  </div>
                 </div>
 
                 <div className="field-row">
