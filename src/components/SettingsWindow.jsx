@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { minutesToTimeStr, timeStrToMinutes, DEFAULT_SETTINGS, tierBrightness, tierGlow, tierHex, hsvToHex } from '../lib/logic';
+import WhitelistPicker from './WhitelistPicker';
 
 const SHAPES = [
   { id: 'star4', label: '四芒星' },
@@ -35,7 +36,7 @@ export default function SettingsWindow({
 }) {
   const [tab, setTab] = useState(() => {
     const saved = settings.settingsTab;
-    return saved === 'rules' || saved === 'backup' ? saved : 'appearance';
+    return ['rules', 'backup', 'psychology'].includes(saved) ? saved : 'appearance';
   });
   const [exchangeAmount, setExchangeAmount] = useState(1);
   const [spendAmount, setSpendAmount] = useState(1);
@@ -44,6 +45,7 @@ export default function SettingsWindow({
   const [storageBusy, setStorageBusy] = useState(null);
   const [storageMsg, setStorageMsg] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [whitelistOpen, setWhitelistOpen] = useState(false);
   const [debugUnlocked, setDebugUnlocked] = useState(false);
   const [pointsDelta, setPointsDelta] = useState('');
   const [allowanceDelta, setAllowanceDelta] = useState('');
@@ -106,6 +108,27 @@ export default function SettingsWindow({
   if (!open) return null;
 
   const update = (patch) => onChange({ ...settings, ...patch });
+
+  const psych = settings.psychology || DEFAULT_SETTINGS.psychology;
+  const sleepCfg = psych.healthySleep;
+  const pactCfg = psych.pact;
+  const updatePsych = (patch) => update({ psychology: { ...psych, ...patch } });
+  const resetSleep = () => updatePsych({
+    healthySleep: JSON.parse(JSON.stringify(DEFAULT_SETTINGS.psychology.healthySleep))
+  });
+  const resetPact = () => updatePsych({
+    pact: JSON.parse(JSON.stringify(DEFAULT_SETTINGS.psychology.pact))
+  });
+
+  const special = settings.specialWhitelist || DEFAULT_SETTINGS.specialWhitelist;
+  const updateSpecial = (patch) => update({ specialWhitelist: { ...special, ...patch } });
+  const whitelistKey = (item) => (
+    item.self ? '__self__' : (item.path || `name:${item.name || ''}`).toLowerCase()
+  );
+  const removeWhitelistItem = (item) => {
+    const key = whitelistKey(item);
+    updateSpecial({ items: special.items.filter((it) => whitelistKey(it) !== key) });
+  };
 
   const switchTab = (next) => {
     setTab(next);
@@ -256,6 +279,12 @@ export default function SettingsWindow({
             onClick={() => switchTab('rules')}
           >
             规则设置
+          </button>
+          <button
+            className={`settings-tab ${tab === 'psychology' ? 'on' : ''}`}
+            onClick={() => switchTab('psychology')}
+          >
+            心理学模型
           </button>
           <button
             className={`settings-tab ${tab === 'backup' ? 'on' : ''}`}
@@ -623,6 +652,140 @@ export default function SettingsWindow({
 
               <div className="settings-section">
                 <div className="settings-title-row">
+                  <div className="settings-title">进程监控</div>
+                  <button className="settings-reset-mini" onClick={() => resetKeys(['maxWorkGroups', 'selfWhitelist'])}>恢复默认</button>
+                </div>
+                <p className="settings-desc">
+                  可同时勾选两个进程作为专注目标，焦点停留在任一进程都算专注。
+                  最近用过的双进程组合会作为「工作组」排在选择列表最前，方便直接套用。
+                </p>
+                <div className="field-row">
+                  <label>工作组保留数量</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={3}
+                    max={7}
+                    step={1}
+                    value={settings.maxWorkGroups ?? 3}
+                    onChange={(e) => update({
+                      maxWorkGroups: Math.max(3, Math.min(7, Math.round(Number(e.target.value) || 3)))
+                    })}
+                  />
+                  <span className="field-hint">3 ~ 7 个，按使用频率排序</span>
+                </div>
+                <div className="field-row">
+                  <label>将本软件列为默认白名单</label>
+                  <button
+                    className={`switch ${settings.selfWhitelist ? 'on' : ''}`}
+                    onClick={() => update({ selfWhitelist: !settings.selfWhitelist })}
+                    role="switch"
+                    aria-checked={!!settings.selfWhitelist}
+                    aria-label="将本软件列为默认白名单"
+                  >
+                    <span className="switch-knob" />
+                  </button>
+                </div>
+                <p className="settings-desc">
+                  开启后，专注期间切到星流本身不算偏离：普通模式暂停加分，严格模式同样暂停但不会倒扣。
+                </p>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-title-row">
+                  <div className="settings-title">特殊白名单</div>
+                  <button
+                    className="settings-reset-mini"
+                    onClick={() => update({
+                      specialWhitelist: JSON.parse(JSON.stringify(DEFAULT_SETTINGS.specialWhitelist))
+                    })}
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                <p className="settings-desc">
+                  焦点落到这些软件上时不算偏离，积分照常累积，但速度降为下面的设定值。
+                  最多选择 5 个进程，也可以把本软件加入白名单。
+                </p>
+
+                <div className="field-row">
+                  <span className="field-label-group">
+                    <label>启用特殊白名单</label>
+                    {special.enabled && <span className="field-active">已激活</span>}
+                  </span>
+                  <button
+                    className={`switch ${special.enabled ? 'on' : ''}`}
+                    onClick={() => updateSpecial({ enabled: !special.enabled })}
+                    role="switch"
+                    aria-checked={!!special.enabled}
+                    aria-label="启用特殊白名单"
+                  >
+                    <span className="switch-knob" />
+                  </button>
+                </div>
+
+                <div className="field-row field-col">
+                  <label>白名单进程（最多 5 个）</label>
+                  <div className="whitelist-chips">
+                    {special.items.length ? special.items.map((item) => {
+                      const key = whitelistKey(item);
+                      return (
+                        <span className="whitelist-chip" key={key}>
+                          {item.self ? 'Starry Flow（本软件）' : item.name}
+                          <button
+                            className="whitelist-chip-remove"
+                            onClick={() => removeWhitelistItem(item)}
+                            aria-label={`移除 ${item.name}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    }) : <span className="whitelist-empty">还没有选择进程</span>}
+                  </div>
+                  <button
+                    className="settings-action settings-action-inline whitelist-pick-btn"
+                    onClick={() => setWhitelistOpen(true)}
+                  >
+                    选择进程
+                  </button>
+                </div>
+
+                <div className="field-row">
+                  <label>普通模式积分速度</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={1}
+                    step={1}
+                    value={special.normalSpeed}
+                    disabled={!special.enabled}
+                    onChange={(e) => updateSpecial({
+                      normalSpeed: Math.max(1, Math.round(Number(e.target.value) || 1))
+                    })}
+                  />
+                  <span className="field-hint">积分/秒</span>
+                </div>
+
+                <div className="field-row">
+                  <label>严格模式积分速度</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={1}
+                    step={1}
+                    value={special.strictSpeed}
+                    disabled={!special.enabled}
+                    onChange={(e) => updateSpecial({
+                      strictSpeed: Math.max(1, Math.round(Number(e.target.value) || 1))
+                    })}
+                  />
+                  <span className="field-hint">积分/秒</span>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-title-row">
                   <div className="settings-title">兑换与额度</div>
                   <button className="settings-reset-mini" onClick={resetExchange}>恢复默认</button>
                 </div>
@@ -868,6 +1031,144 @@ export default function SettingsWindow({
             </div>
           )}
 
+          {tab === 'psychology' && (
+            <div className="settings-grid">
+              <div className="settings-section">
+                <div className="settings-title-row">
+                  <div className="settings-title">德西效应 · 健康就寝</div>
+                  <button className="settings-reset-mini" onClick={resetSleep}>恢复默认</button>
+                </div>
+                <p className="settings-desc">
+                  到达设定的就寝时间后，专注积分速度降为下面设定的值，提醒你及时休息，不用熬低效率的夜。
+                  在就寝时间之后结算当日积分，还会获得一枚「乖乖睡觉」纪念章。
+                </p>
+
+                <div className="field-row">
+                  <span className="field-label-group">
+                    <label>健康就寝模式</label>
+                    {sleepCfg.enabled && <span className="field-active">已激活</span>}
+                  </span>
+                  <button
+                    className={`switch ${sleepCfg.enabled ? 'on' : ''}`}
+                    onClick={() => updatePsych({ healthySleep: { ...sleepCfg, enabled: !sleepCfg.enabled } })}
+                    role="switch"
+                    aria-checked={!!sleepCfg.enabled}
+                    aria-label="健康就寝模式"
+                  >
+                    <span className="switch-knob" />
+                  </button>
+                </div>
+
+                <div className="field-row">
+                  <label>就寝时间</label>
+                  <input
+                    type="time"
+                    value={minutesToTimeStr(sleepCfg.bedtimeMinutes)}
+                    disabled={!sleepCfg.enabled}
+                    onChange={(e) => {
+                      const minutes = timeStrToMinutes(e.target.value);
+                      if (Number.isFinite(minutes)) {
+                        updatePsych({ healthySleep: { ...sleepCfg, bedtimeMinutes: minutes } });
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className="field-row">
+                  <label>普通模式积分速度</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={1}
+                    step={1}
+                    value={sleepCfg.normalSpeed}
+                    disabled={!sleepCfg.enabled}
+                    onChange={(e) => updatePsych({
+                      healthySleep: { ...sleepCfg, normalSpeed: Math.max(1, Math.round(Number(e.target.value) || 1)) }
+                    })}
+                  />
+                  <span className="field-hint">积分/秒</span>
+                </div>
+
+                <div className="field-row">
+                  <label>严格模式积分速度</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={1}
+                    step={1}
+                    value={sleepCfg.strictSpeed}
+                    disabled={!sleepCfg.enabled}
+                    onChange={(e) => updatePsych({
+                      healthySleep: { ...sleepCfg, strictSpeed: Math.max(1, Math.round(Number(e.target.value) || 1)) }
+                    })}
+                  />
+                  <span className="field-hint">积分/秒</span>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-title-row">
+                  <div className="settings-title">损失厌恶效应 · 对赌协议</div>
+                  <button className="settings-reset-mini" onClick={resetPact}>恢复默认</button>
+                </div>
+                <p className="settings-desc">
+                  开启后在星图上点击未来日期的星点，为那一天立下积分目标。
+                  当天达成目标会获得额外积分，未达到判定比例则产生等额赤字积分，需要从当日累计中偿还。
+                </p>
+
+                <div className="field-row">
+                  <span className="field-label-group">
+                    <label>对赌协议</label>
+                    {pactCfg.enabled && <span className="field-active">已激活</span>}
+                  </span>
+                  <button
+                    className={`switch ${pactCfg.enabled ? 'on' : ''}`}
+                    onClick={() => updatePsych({ pact: { ...pactCfg, enabled: !pactCfg.enabled } })}
+                    role="switch"
+                    aria-checked={!!pactCfg.enabled}
+                    aria-label="对赌协议"
+                  >
+                    <span className="switch-knob" />
+                  </button>
+                </div>
+
+                <div className="field-row">
+                  <label>达标判定比例</label>
+                  <input
+                    type="range"
+                    min={50}
+                    max={100}
+                    step={5}
+                    value={pactCfg.ratio}
+                    disabled={!pactCfg.enabled}
+                    onChange={(e) => updatePsych({ pact: { ...pactCfg, ratio: Number(e.target.value) } })}
+                  />
+                  <span className="field-value">{pactCfg.ratio}%</span>
+                </div>
+
+                <div className="field-row">
+                  <label>达成额外奖励</label>
+                  <input
+                    type="range"
+                    min={50}
+                    max={150}
+                    step={5}
+                    value={pactCfg.reward}
+                    disabled={!pactCfg.enabled}
+                    onChange={(e) => updatePsych({ pact: { ...pactCfg, reward: Number(e.target.value) } })}
+                  />
+                  <span className="field-value">{pactCfg.reward}%</span>
+                </div>
+
+                <p className="settings-desc">
+                  例：目标 10,000 积分、奖励 100%，当天达成后实际获得 20,000 积分，并触发一次全屏礼花。
+                  未达到 {pactCfg.ratio}% 时，会欠下与目标等额的赤字积分。
+                </p>
+              </div>
+            </div>
+          )}
+
           {tab === 'backup' && (
             <div className="settings-grid">
               <div className="settings-section settings-wide">
@@ -987,6 +1288,17 @@ export default function SettingsWindow({
             恢复默认设置
           </button>
         </div>
+
+        <WhitelistPicker
+          open={whitelistOpen}
+          processes={(focus && focus.processes) || []}
+          items={special.items}
+          onSave={(list) => {
+            updateSpecial({ items: list });
+            setWhitelistOpen(false);
+          }}
+          onClose={() => setWhitelistOpen(false)}
+        />
 
         {confirmOpen && (
           <div className="confirm-mask" onClick={() => setConfirmOpen(false)}>

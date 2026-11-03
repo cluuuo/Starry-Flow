@@ -22,9 +22,12 @@ contextBridge.exposeInMainWorld('api', {
   readMarkImage: (file) => ipcRenderer.invoke('marks:readImage', file),
   deleteMarkImage: (file) => ipcRenderer.invoke('marks:deleteImage', file),
   saveMarkImageAs: (payload) => ipcRenderer.invoke('marks:saveAs', payload),
+  getAchievements: () => ipcRenderer.invoke('achievements:get'),
+  setAchievements: (data) => ipcRenderer.invoke('achievements:set', data),
   windowControl: (action) => ipcRenderer.send('window:control', action),
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   getWindowMode: () => ipcRenderer.invoke('window:get-mode'),
+  getAppVersion: () => ipcRenderer.invoke('app:version'),
   setWindowMode: (mode) => ipcRenderer.invoke('window:set-mode', mode),
   onWindowMode: (cb) => {
     const handler = (_event, mode) => cb(mode);

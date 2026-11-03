@@ -6,6 +6,10 @@ import FocusPanel from './components/FocusPanel';
 import StatsBar from './components/StatsBar';
 import SettingsWindow from './components/SettingsWindow';
 import MarkPanel from './components/MarkPanel';
+import AchievementHall from './components/AchievementHall';
+import PactPanel from './components/PactPanel';
+import DeficitPanel from './components/DeficitPanel';
+import Celebration from './components/Celebration';
 import Toast from './components/Toast';
 import {
   DEFAULT_SETTINGS,
@@ -24,17 +28,78 @@ import {
   journeyMessage
 } from './lib/logic';
 import { generateMockDays, mockTodayPoints } from './lib/mock';
+import {
+  buildAchievementContext,
+  syncAchievements,
+  createAchievementState,
+  earnedAchievements,
+  totalMedals
+} from './lib/achievements';
 
 // 采集端是否已实际应用某条指令，用于在确认前保留本地乐观状态
 function commandConfirmed(action, payload, state) {
   if (action === 'start') return !!state.running;
   if (action === 'pause') return !state.running;
-  if (action === 'select') return (state.selected_pid || null) === ((payload && payload.pid) || null);
+  if (action === 'select') {
+    const want = (((payload && payload.pids) || []).map((p) => p.pid)).sort((a, b) => a - b);
+    const have = ((state.selected_pids || []).map((p) => p.pid)).sort((a, b) => a - b);
+    if (want.length !== have.length) return false;
+    return want.every((pid, i) => pid === have[i]);
+  }
   if (action === 'set_strict') {
     const real = !!(state.settings && state.settings.strict && state.settings.strict.enabled);
     return real === !!(payload && payload.enabled);
   }
   return true;
+}
+
+// 进程历史以可执行路径为键，路径缺失时退回进程名
+function processKey(p) {
+  if (!p) return '';
+  return p.path ? p.path : `name:${p.name || ''}`;
+}
+
+// 记录选择历史：双进程记入工作组，单进程记入常用
+function recordProcessHistory(list, history) {
+  const base = history && typeof history === 'object' ? history : {};
+  const groups = (Array.isArray(base.groups) ? base.groups : []).map((g) => ({
+    paths: [...(g.paths || [])],
+    names: [...(g.names || [])],
+    count: Math.max(1, Number(g.count) || 1)
+  }));
+  const singles = (Array.isArray(base.singles) ? base.singles : []).map((s) => ({
+    path: s.path,
+    name: s.name || '',
+    count: Math.max(1, Number(s.count) || 1)
+  }));
+
+  const items = (list || []).slice(0, 2).filter(Boolean);
+
+  if (items.length === 2) {
+    const keys = items.map(processKey);
+    const names = items.map((p) => p.name || '');
+    const sig = keys.slice().sort().join('|');
+    const hit = groups.find((g) => g.paths.slice().sort().join('|') === sig);
+    if (hit) {
+      hit.count += 1;
+      hit.names = names;
+    } else {
+      groups.push({ paths: keys, names, count: 1 });
+    }
+  } else if (items.length === 1) {
+    const key = processKey(items[0]);
+    const hit = singles.find((s) => s.path === key);
+    if (hit) {
+      hit.count += 1;
+      hit.name = items[0].name || hit.name;
+    } else {
+      singles.push({ path: key, name: items[0].name || '', count: 1 });
+    }
+  }
+
+  groups.sort((a, b) => b.count - a.count);
+  singles.sort((a, b) => b.count - a.count);
+  return { groups: groups.slice(0, 20), singles: singles.slice(0, 20) };
 }
 
 export default function App() {
@@ -54,7 +119,16 @@ export default function App() {
   const [maximized, setMaximized] = useState(false);
   const [storageInfo, setStorageInfo] = useState(null);
   const [windowMode, setWindowMode] = useState('classic');
+  const [appVersion, setAppVersion] = useState('');
+  const [achievements, setAchievements] = useState({ version: 1, unlocked: {} });
+  const [achievementsReady, setAchievementsReady] = useState(false);
+  const [hallOpen, setHallOpen] = useState(false);
+  const [pactDay, setPactDay] = useState(null);
+  const [deficitOpen, setDeficitOpen] = useState(false);
+  const [celebration, setCelebration] = useState(0);
   const pendingCommandRef = useRef(null);
+  const achievementsRef = useRef({ version: 1, unlocked: {} });
+  const achievementNoticeRef = useRef(false);
 
   const todayKey = logicalDateKey(new Date(), settings.dayStartMinutes);
 
@@ -90,6 +164,13 @@ export default function App() {
     if (!window.api || !window.api.setWindowMode) return;
     const next = await window.api.setWindowMode(mode);
     if (next === 'classic' || next === 'compact') setWindowMode(next);
+  }, []);
+
+  // 版本号取自放包时的 package.json，升版后自动显示新数字，无需手改界面
+  useEffect(() => {
+    const api = window.api;
+    if (!api || !api.getAppVersion) return;
+    api.getAppVersion().then((v) => { if (v) setAppVersion(String(v)); }).catch(() => {});
   }, []);
 
   // 初始加载
@@ -142,6 +223,35 @@ export default function App() {
       }
       setMarks(m && typeof m === 'object' ? m : {});
     })();
+  }, []);
+
+  // 加载成就存档：桌面端由主进程托管 achievements.json，浏览器演示模式退回 localStorage
+  useEffect(() => {
+    (async () => {
+      let raw = null;
+      try {
+        if (window.api) raw = await window.api.getAchievements();
+        else raw = JSON.parse(localStorage.getItem('starryflow.achievements') || 'null');
+      } catch (e) {
+        raw = null;
+      }
+      const state = createAchievementState(raw);
+      achievementsRef.current = state;
+      setAchievements(state);
+      setAchievementsReady(true);
+    })();
+  }, []);
+
+  const persistAchievements = useCallback((next) => {
+    if (window.api) {
+      window.api.setAchievements(next);
+    } else {
+      try {
+        localStorage.setItem('starryflow.achievements', JSON.stringify(next));
+      } catch (e) {
+        /* 浏览器演示模式的容量上限，忽略即可 */
+      }
+    }
   }, []);
 
   const persistMarks = useCallback((next) => {
@@ -234,6 +344,7 @@ export default function App() {
       if (last && last.id !== lastNoticeRef.current) {
         lastNoticeRef.current = last.id;
         setNotice(last);
+        if (last.celebrate) setCelebration(last.id);
       }
     }, 400);
     return () => clearInterval(timer);
@@ -280,15 +391,21 @@ export default function App() {
         next.penalty_active = false;
         next.warn_message = null;
       } else if (action === 'select') {
-        const pid = payload && payload.pid ? payload.pid : null;
-        next.selected_pid = pid;
-        next.selected_name = pid ? (payload.name || '') : null;
-        next.selected_path = pid ? (payload.path || '') : null;
+        const list = (((payload && payload.pids) || []).slice(0, 2)).map((p) => ({
+          pid: p.pid,
+          name: p.name || '',
+          path: p.path || ''
+        }));
+        next.selected_pids = list;
+        next.selected_pid = list.length ? list[0].pid : null;
+        next.selected_name = list.length ? list[0].name : null;
+        next.selected_path = list.length ? list[0].path : null;
         next.running = false;
         if (prev.running) next.status = 'paused';
-        else if (!pid) next.status = 'idle';
+        else if (!list.length) next.status = 'idle';
         next.focus_lost = false;
         next.penalty_active = false;
+        next.whitelist_paused = false;
         next.warn_message = null;
       } else if (action === 'set_strict') {
         if (next.settings && next.settings.strict) {
@@ -312,6 +429,34 @@ export default function App() {
     return window.api.sendFocusCommand(action, payload);
   }, []);
 
+  // 选择进程：立即下发采集端，同时把本次组合记入历史（双进程为工作组，单进程为常用）
+  const handlePickProcesses = useCallback((list) => {
+    const items = (list || []).slice(0, 2).filter(Boolean);
+    if (!items.length) return;
+    sendFocusCommand('select', { pids: items });
+    handleSettingsChange({
+      ...settings,
+      processHistory: recordProcessHistory(items, settings.processHistory)
+    });
+  }, [settings, sendFocusCommand, handleSettingsChange]);
+
+  // 对赌：立下 / 修改 / 取消，以及平账
+  const handleSavePact = useCallback(({ date, goal, oldDate }) => {
+    if (oldDate && oldDate !== date) sendFocusCommand('cancel_pact', { date: oldDate });
+    sendFocusCommand('set_pact', { date, goal });
+    setPactDay(null);
+  }, [sendFocusCommand]);
+
+  const handleCancelPact = useCallback((date) => {
+    sendFocusCommand('cancel_pact', { date });
+    setPactDay(null);
+  }, [sendFocusCommand]);
+
+  const handlePayDeficit = useCallback((amount) => {
+    sendFocusCommand('pay_deficit', { amount });
+    setDeficitOpen(false);
+  }, [sendFocusCommand]);
+
   const handleBackupExport = useCallback(() => {
     if (!window.api) return Promise.resolve({ ok: false, error: '仅桌面端可用' });
     return window.api.exportBackup();
@@ -325,6 +470,11 @@ export default function App() {
       try {
         const m = (await window.api.getMarks()) || {};
         setMarks(m);
+      } catch (e) { /* 忽略 */ }
+      try {
+        const st = createAchievementState(await window.api.getAchievements());
+        achievementsRef.current = st;
+        setAchievements(st);
       } catch (e) { /* 忽略 */ }
       setNotice({ id: Date.now(), ok: true, message: '备份已导入，采集已暂停，请重新选择进程。' });
     }
@@ -383,6 +533,44 @@ export default function App() {
     return out;
   }, [days, focus?.settled, todayKey, todayPoints]);
 
+  // 成就判定以全部历史为准（含已结算与本轮），每次按累计次数补发，记录可幂等回算
+  const achievementCtx = useMemo(
+    () => buildAchievementContext({
+      days: displayDays,
+      todayKey,
+      dayStartMinutes: settings.dayStartMinutes,
+      tiers: settings.tiers,
+      counters: focus?.counters
+    }),
+    [displayDays, todayKey, settings.dayStartMinutes, settings.tiers, focus?.counters]
+  );
+
+  const earnedMedals = useMemo(() => earnedAchievements(achievements), [achievements]);
+  const medalCount = useMemo(() => totalMedals(achievements), [achievements]);
+
+  useEffect(() => {
+    if (!loaded || !achievementsReady) return;
+    // 首次判定只补算历史，不弹提示；此后的增量才提示
+    const firstSync = !achievementNoticeRef.current;
+    achievementNoticeRef.current = true;
+
+    const { state, gained } = syncAchievements(achievementsRef.current, achievementCtx);
+    if (!gained.length) return;
+
+    achievementsRef.current = state;
+    setAchievements(state);
+    persistAchievements(state);
+
+    if (!firstSync) {
+      const latest = gained[gained.length - 1];
+      setNotice({
+        id: Date.now(),
+        ok: true,
+        message: `获得成就纪念章 · ${latest.name}（${latest.count} 枚）`
+      });
+    }
+  }, [achievementCtx, loaded, achievementsReady, persistAchievements]);
+
   // 统计只覆盖本次旅程（起始日之后），重新开始时同步归零
   const scopedDays = useMemo(() => {
     if (!startDateKey) return displayDays;
@@ -428,7 +616,10 @@ export default function App() {
         <div className="app-title">
           <img className="app-logo" src="./icon.png" alt="" />
           <div>
-            <h1>Starry Flow</h1>
+            <div className="app-title-line">
+              <h1>Starry Flow</h1>
+              {appVersion && <span className="app-version">v{appVersion}</span>}
+            </div>
             <p>星流 · 专注目标与进度可视化</p>
           </div>
         </div>
@@ -514,6 +705,13 @@ export default function App() {
           animated: settings.sky.animated !== false
         }}
         variant={windowMode === 'compact' ? 'compact' : 'classic'}
+        processHistory={settings.processHistory}
+        maxWorkGroups={settings.maxWorkGroups}
+        onPickProcesses={handlePickProcesses}
+        deficit={focus?.deficit || 0}
+        onPayDeficit={() => setDeficitOpen(true)}
+        sleepActive={!!focus?.sleep_active}
+        specialActive={!!focus?.special_active}
       />
 
       {windowMode !== 'compact' && (
@@ -555,6 +753,9 @@ export default function App() {
             settings={settings}
             marks={marks}
             onSelectDay={setActiveDay}
+            pactEnabled={!!(settings.psychology && settings.psychology.pact.enabled)}
+            pacts={focus?.pacts || {}}
+            onPactDay={setPactDay}
           />
         )}
 
@@ -586,6 +787,8 @@ export default function App() {
         todayKey={todayKey}
         dayStartMinutes={settings.dayStartMinutes}
         tiers={settings.tiers}
+        medalCount={medalCount}
+        onOpenHall={() => setHallOpen(true)}
       />
       )}
 
@@ -605,6 +808,34 @@ export default function App() {
         onResetStorage={handleResetStorage}
         onRestartApp={handleRestartApp}
       />
+
+      <PactPanel
+        open={!!pactDay}
+        dateKey={pactDay}
+        todayKey={todayKey}
+        pacts={focus?.pacts || {}}
+        ratio={(settings.psychology && settings.psychology.pact.ratio) || 80}
+        reward={(settings.psychology && settings.psychology.pact.reward) || 100}
+        onSave={handleSavePact}
+        onCancel={handleCancelPact}
+        onClose={() => setPactDay(null)}
+      />
+
+      <DeficitPanel
+        open={deficitOpen}
+        deficit={focus?.deficit || 0}
+        available={todayPoints + todaySettled}
+        onPay={handlePayDeficit}
+        onClose={() => setDeficitOpen(false)}
+      />
+
+      <AchievementHall
+        open={hallOpen}
+        medals={earnedMedals}
+        onClose={() => setHallOpen(false)}
+      />
+
+      <Celebration trigger={celebration} onDone={() => setCelebration(0)} />
 
       {activeDay && (
         <MarkPanel

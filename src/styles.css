@@ -88,6 +88,23 @@ body::before {
   gap: 14px;
 }
 
+/* 标题与版本号同一行，版本号小字低调跟随在右侧 */
+.app-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.app-version {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+  opacity: 0.6;
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
 .app-title h1 {
   font-size: 21px;
   font-weight: 700;
@@ -417,6 +434,38 @@ body::before {
   overflow: hidden;
 }
 
+/* 双进程：图标框横向展开，两个小图标并排 */
+.focus-app-icon-slot {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.focus-app-icon.multi {
+  width: 60px;
+  gap: 3px;
+  padding: 2px;
+  border-radius: 10px;
+}
+
+.focus-app-icon.multi .focus-app-icon-slot {
+  flex: 1;
+  min-width: 0;
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.focus-app-icon.multi img {
+  padding: 2px;
+}
+
+.focus-app-icon.multi .process-letter {
+  font-size: 12px;
+}
+
 .focus-app-text {
   display: flex;
   flex-direction: column;
@@ -698,6 +747,252 @@ body::before {
   flex-shrink: 0;
 }
 
+/* 多选进程弹窗：工作组、常用与勾选列表 */
+.picker-window-group {
+  width: 620px;
+  max-height: 78vh;
+}
+
+.picker-body {
+  flex: 1;
+  min-height: 180px;
+  overflow-y: auto;
+  padding: 2px 16px 8px;
+}
+
+.picker-section {
+  margin-bottom: 14px;
+}
+
+.picker-section-title {
+  padding: 6px 4px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-faint);
+}
+
+/* 工作组：一次点选两个已绑定的进程 */
+.group-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.group-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.group-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.group-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.group-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.group-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 3px;
+}
+
+.group-icon .process-letter {
+  font-size: 12px;
+}
+
+.group-names {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* 常用单进程：紧凑胶囊 */
+.frequent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.frequent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.frequent-item:hover:not(:disabled) {
+  background: var(--card-hover);
+}
+
+.frequent-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.frequent-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--card);
+}
+
+.frequent-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 2px;
+}
+
+.frequent-icon .process-letter {
+  font-size: 10px;
+}
+
+.frequent-name {
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 勾选框与列表容器 */
+.picker-list-group {
+  flex: none;
+  min-height: 0;
+  overflow: visible;
+  padding: 0 2px;
+}
+
+.pick-box {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  font-size: 11px;
+  color: transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.pick-box.on {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text);
+}
+
+/* 底部：已选计数 + 取消 / 应用 */
+.picker-foot.picker-foot-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 22px 14px;
+}
+
+.picker-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.picker-cancel,
+.picker-apply {
+  padding: 7px 15px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.picker-cancel {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+}
+
+.picker-cancel:hover {
+  color: var(--text);
+  border-color: #2d4370;
+}
+
+.picker-apply {
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.picker-apply:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.picker-apply:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .picker-empty {
   padding: 40px 0;
   text-align: center;
@@ -752,6 +1047,53 @@ body::before {
     0 0 18px rgba(255, 86, 78, 0.55),
     0 0 42px rgba(255, 70, 60, 0.35);
   transition: color 0.3s;
+}
+
+/* 当前积分与赤字同一行：赤字贴最右侧，字号与积分数字一致 */
+.focus-value-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.focus-value-row .focus-number-wrap {
+  align-self: auto;
+}
+
+.focus-deficit {
+  margin-bottom: 4px;
+  padding: 0 2px;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 54px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: #ff5f57;
+  text-shadow:
+    0 0 16px rgba(255, 86, 78, 0.55),
+    0 0 40px rgba(255, 70, 60, 0.32);
+  cursor: pointer;
+  transition: color 0.2s, text-shadow 0.2s;
+}
+
+.focus-deficit:hover {
+  color: #ff8b85;
+  text-shadow:
+    0 0 20px rgba(255, 86, 78, 0.7),
+    0 0 50px rgba(255, 70, 60, 0.45);
+}
+
+/* 就寝时段降速提示 */
+.focus-sleep-tag,
+.focus-special-tag {
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
 }
 
 /* 严格模式：数字背后自左向右划过的流星 */
@@ -844,6 +1186,13 @@ body::before {
   color: #ffb4a8;
   background: rgba(231, 76, 60, 0.1);
   border: 1px solid rgba(231, 76, 60, 0.35);
+}
+
+/* 本软件白名单：切到星流时只是暂停，用中性色而不是告警红 */
+.focus-warn.whitelist {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
 .focus-foot {
@@ -1369,6 +1718,12 @@ body::before {
   color: var(--accent);
 }
 
+.tip-pact {
+  margin-top: 7px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--accent) 80%, #ffffff);
+}
+
 .tip-hint {
   margin-top: 6px;
   font-size: 12px;
@@ -1378,6 +1733,29 @@ body::before {
 /* ---------- 印痕卫星 ---------- */
 .star-slot.is-clickable {
   cursor: pointer;
+}
+
+/* 对赌标记：有未完成计划的日子在星点右上角点一颗小灯 */
+.pact-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* 可设对赌的未来星点：悬停时给一圈淡淡的主题色提示 */
+.star-slot.is-pact-target .star {
+  opacity: 0.95;
+}
+
+.star-slot.is-pact-target:hover .star {
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 45%, transparent));
 }
 
 /* 卫星挂在星点内部，随星点同一份 transform 动画移动，天然保持相对位置 */
@@ -1850,7 +2228,7 @@ body::before {
 /* ---------- 统计栏 ---------- */
 .stats-bar {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -1876,6 +2254,543 @@ body::before {
   color: var(--text-dim);
   letter-spacing: 1px;
 }
+
+/* ---------- 成就展厅入口 ---------- */
+/* 与其余统计卡同尺寸，仅重置按钮的默认外观 */
+.stat-entry {
+  position: relative;
+  overflow: hidden;
+  appearance: none;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* 右下角主题色光晕：光源位于卡片边角之外，弥散地打进来 */
+.stat-entry::after {
+  content: '';
+  position: absolute;
+  right: -86px;
+  bottom: -96px;
+  width: 196px;
+  height: 196px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent) 30%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 13%, transparent) 32%,
+    color-mix(in srgb, var(--accent) 4%, transparent) 60%,
+    transparent 82%
+  );
+  filter: blur(16px);
+  opacity: 0.72;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+
+.stat-entry:hover::after {
+  opacity: 0.86;
+  transform: scale(1.08);
+}
+
+.stat-entry .stat-value,
+.stat-entry .stat-label {
+  position: relative;
+  z-index: 1;
+}
+
+.stat-entry:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+.stat-entry:hover .stat-value {
+  color: var(--accent);
+}
+
+.stat-entry .stat-value {
+  transition: color 0.2s;
+}
+
+/* ---------- 成就展厅 ---------- */
+.achievement-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 105;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 12, 0.62);
+  backdrop-filter: blur(4px);
+  animation: fade-in 0.2s;
+}
+
+.achievement-window {
+  width: min(1040px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(ellipse 70% 46% at 50% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 72%),
+    var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: pop-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.achievement-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px 30px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.achievement-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.achievement-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.achievement-body {
+  overflow-y: auto;
+  padding: 26px 30px 32px;
+  scrollbar-gutter: stable;
+}
+
+.achievement-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+}
+
+.achievement-grid .medal-card {
+  width: 220px;
+  flex: 0 0 220px;
+}
+
+/* 纪念章卡片：顶部锥形打光落在徽章上，名称与数量排在下方 */
+.medal-card {
+  position: relative;
+  padding: 8px 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent 62%),
+    color-mix(in srgb, var(--card-hover) 45%, transparent);
+  text-align: center;
+  overflow: hidden;
+  animation: medal-in 0.46s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
+  transition: transform 0.25s, border-color 0.25s;
+}
+
+.medal-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+@keyframes medal-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.medal-stage {
+  position: relative;
+  height: 186px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 14px;
+}
+
+/* 锥形光柱：上端窄、下端散开，亮度自上而下递减 */
+.medal-beam {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 150px;
+  height: 168px;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 30%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 12%, transparent) 46%,
+    transparent 88%
+  );
+  clip-path: polygon(43% 0%, 57% 0%, 100% 100%, 0% 100%);
+  filter: blur(5px);
+  opacity: 0.85;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+
+.medal-card:hover .medal-beam {
+  opacity: 1;
+}
+
+.medal-floor {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 126px;
+  height: 22px;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 34%, transparent), transparent 72%);
+  filter: blur(5px);
+  pointer-events: none;
+}
+
+.medal-disc {
+  position: relative;
+  z-index: 1;
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(
+      circle at 36% 28%,
+      color-mix(in srgb, var(--accent) 70%, #ffffff) 0%,
+      color-mix(in srgb, var(--accent) 34%, transparent) 38%,
+      color-mix(in srgb, var(--bg-deep) 88%, #000000) 76%
+    ),
+    var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  box-shadow:
+    inset 0 0 26px color-mix(in srgb, var(--accent) 20%, transparent),
+    0 12px 28px rgba(0, 0, 0, 0.45),
+    0 0 30px color-mix(in srgb, var(--accent) 16%, transparent);
+  transition: box-shadow 0.25s;
+}
+
+.medal-card:hover .medal-disc {
+  box-shadow:
+    inset 0 0 30px color-mix(in srgb, var(--accent) 26%, transparent),
+    0 14px 32px rgba(0, 0, 0, 0.5),
+    0 0 40px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.medal-dash {
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+  opacity: 0.8;
+}
+
+.medal-mark {
+  width: 52px;
+  height: 52px;
+  color: var(--accent);
+  fill: var(--accent);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+
+.medal-name {
+  position: relative;
+  z-index: 1;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.medal-count {
+  position: relative;
+  z-index: 1;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.achievement-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 64px 0 74px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.achievement-empty-disc {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--accent) 26%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.75;
+}
+
+.achievement-empty-disc svg {
+  width: 40px;
+  height: 40px;
+  fill: var(--text-faint);
+  opacity: 0.55;
+}
+
+/* ---------- 对赌 / 平账弹窗 ---------- */
+.dialog-window {
+  width: min(460px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: pop-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dialog-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.dialog-body {
+  padding: 18px 24px 6px;
+}
+
+.dialog-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.dialog-field input {
+  width: 170px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog-field input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.dialog-field input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.dialog-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.65;
+}
+
+.dialog-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #ff8b85;
+}
+
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px 20px;
+}
+
+.dialog-spacer {
+  flex: 1;
+}
+
+.dialog-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 18px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dialog-btn:hover {
+  background: var(--card-hover);
+}
+
+.dialog-btn.primary {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  color: var(--accent);
+}
+
+.dialog-btn.primary:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.dialog-btn.danger {
+  color: #ff8b85;
+  border-color: rgba(255, 120, 120, 0.32);
+}
+
+.dialog-btn.danger:hover {
+  background: rgba(255, 120, 120, 0.1);
+}
+
+.dialog-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.deficit-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0 12px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.deficit-summary-value {
+  font-size: 34px;
+  font-weight: 700;
+  color: #ff5f57;
+  text-shadow: 0 0 18px rgba(255, 86, 78, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 特殊白名单 ---------- */
+.whitelist-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.whitelist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.whitelist-chip-remove {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.whitelist-chip-remove:hover {
+  color: #ff8b85;
+}
+
+.whitelist-empty {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.whitelist-pick-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.whitelist-window {
+  width: 560px;
+}
+
+.whitelist-count {
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.whitelist-count.full {
+  color: var(--accent);
+}
+
+.whitelist-self-tag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.whitelist-error {
+  padding: 0 22px 8px;
+  font-size: 12px;
+  color: #ff8b85;
+}
+
+.whitelist-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* 对赌达成的全屏礼花 */
+.celebration-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  pointer-events: none;
+}
+
 
 /* ---------- 设置窗口 ---------- */
 .settings-mask {
@@ -2206,6 +3121,17 @@ body::before {
   white-space: nowrap;
 }
 
+/* 模式已开启的状态标记：与文案同字号，主题色并带发光 */
+.field-active {
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 1px;
+  text-shadow:
+    0 0 8px color-mix(in srgb, var(--accent) 62%, transparent),
+    0 0 18px color-mix(in srgb, var(--accent) 32%, transparent);
+  white-space: nowrap;
+}
+
 .field-row input[type='color'] {
   width: 48px;
   height: 30px;
@@ -2440,6 +3366,12 @@ body::before {
 .field-row input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* 关闭某个模式时，关联输入置灰但仍可读 */
+.field-row input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .tier-unit {
@@ -2777,6 +3709,10 @@ body::before {
   font-size: 16px;
 }
 
+.app.mode-compact .app-version {
+  font-size: 10px;
+}
+
 .app.mode-compact .app-title p {
   display: none;
 }
@@ -2828,6 +3764,10 @@ body::before {
 .compact-head .focus-app-icon {
   width: 34px;
   height: 34px;
+}
+
+.compact-head .focus-app-icon.multi {
+  width: 54px;
 }
 
 .compact-head .focus-app-text {

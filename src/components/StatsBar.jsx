@@ -1,7 +1,14 @@
 import React from 'react';
 import { computeStreak } from '../lib/logic';
 
-export default function StatsBar({ days, todayKey, dayStartMinutes, tiers }) {
+export default function StatsBar({
+  days,
+  todayKey,
+  dayStartMinutes,
+  tiers,
+  medalCount = 0,
+  onOpenHall
+}) {
   const validThreshold = tiers[0].points;
   const entries = Object.entries(days);
 
@@ -29,6 +36,15 @@ export default function StatsBar({ days, todayKey, dayStartMinutes, tiers }) {
           <div className="stat-label">{s.label}</div>
         </div>
       ))}
+      <button
+        type="button"
+        className="stat-card stat-entry card"
+        onClick={onOpenHall}
+        aria-haspopup="dialog"
+      >
+        <div className="stat-value">{medalCount.toLocaleString()} 枚</div>
+        <div className="stat-label">成就展厅</div>
+      </button>
     </div>
   );
 }

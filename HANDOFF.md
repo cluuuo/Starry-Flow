@@ -1,6 +1,6 @@
 # Starry Flow 星流 · 开发交接文档
 
-> 供新对话/新开发者继续开发使用。最后更新：2026-11-01 · 当前版本 **2.8.1**
+> 供新对话/新开发者继续开发使用。最后更新：2026-11-03 · 当前版本 **2.12.0**
 
 ---
 
@@ -30,8 +30,57 @@
 | 数据调试（已结算积分与随心额度正负调整） | 已完成并验证 |
 | 数据存储位置自定义（设置 › 备份与恢复） | 已完成并验证：积分/额度、印痕文字、印痕图片三项路径可查看与更改，重启生效；导入/导出备份已迁到该页 |
 | 显示模式（经典 / 极简 / 迷你） | 已完成并验证：极简为可缩放竖屏面板（默认 424×704，圆环进度 + 中心星点与积分，面板内星空）；迷你为 220×200 透明置顶浮窗（星点 + 今日积分 + 严格模式呼吸光环）；三模式各自记忆位置与尺寸，重启恢复上次模式 |
+| 多进程工作组 | 已完成并验证：最多两个进程同时监控，命中任一即专注；选择列表含工作组 / 常用 / 全部进程三段，工作组数量 3~7 可调；本软件白名单开关（严格模式也暂停不倒扣） |
+| 特殊白名单 | 已完成：规则设置内最多选 5 个进程（可含本软件），焦点落在这些软件上不算偏离、继续积分但按普通/严格模式各自的设定速度降速 |
+| 成就系统 | 功能已完成：条件达成自动获得纪念章、同一成就可反复获得、纪念章累计数量持久化；右下角「成就展厅」入口弹出展示窗口，含锥形打光纪念章。纪念章已用 SVG 绘制 8 种图形 |
+| 心理学模型 | 已完成：设置新增「心理学模型」页，含健康就寝（到点降速、就寝结算得纪念章）与对赌协议（未来星点设目标、达标奖励 + 礼花、未达比例产生赤字、平账得纪念章） |
 | 打包 | setup 安装版产出到 `release/`；2.8.1 已产出 `Starry Flow Setup 2.8.1.exe`（98.67MB，内置 monitor.exe 8.1MB，未签名）；2.8.0 及更早旧包同目录保留；portable 未生成 |
 | 交付前文案审查 | 部分完成（星点引导文案已按用户意见改写，仍需全量复查） |
+
+**未发布改动（工作区）**
+
+- 标题右侧显示版本号：`Starry Flow` 后跟小字 `v2.12.0`（11px、淡色、60% 透明度，极简模式 10px）；数值来自主进程 `app.getVersion()`（`app:version` IPC），每次升版后界面自动同步，不需要改界面代码。
+
+**2.12.0 版本要点（本轮迭代汇总）**
+
+- 设置 › 规则 › 特殊白名单：`settings.specialWhitelist = { enabled, normalSpeed, strictSpeed, items }`，`items` 最多 5 个（`{ name, path, self }`），可按路径去重、允许包含本软件自身；`mergeSettings` 负责清洗与截断。
+- 选择弹窗 `WhitelistPicker.jsx`：列出本软件与当前可见进程，支持搜索、多选、已选 N/5，超出 5 个给出提示；选中项在设置页以胶囊展示，可单个移除。
+- 采集端每 5 秒刷新配置；`in_special_whitelist(fg_pid, cfg)` 命中规则：白名单含 `self` 时走 `is_self_window()`，其余按可执行路径（`os.path.normcase`）与前台进程比对。
+- 命中白名单时：不算偏离、不扣分，积分照常按秒累积，但速度固定为普通模式 `normalSpeed`（默认 2）或严格模式 `strictSpeed`（默认 3）；`focus-data.special_active` 供面板显示「特殊白名单」标签。
+- 优先级：专注进程命中 → 正常速度；`selfWhitelist`（本软件白名单，暂停不计分）优先于特殊白名单；特殊白名单再于偏离判定之前；顺序之外的焦点仍按原规则判定偏离。
+- 版本管理：package.json / package-lock.json 版本号 2.12.0。
+
+**2.11.0 版本要点（本轮迭代汇总）**
+
+- 设置新增「心理学模型」页（`settingsTab: 'psychology'`），配置保存在 `settings.json` 的 `psychology` 字段，`mergeSettings` 负责范围与步进校验。
+- 德西效应 · 健康就寝：`psychology.healthySleep = { enabled, bedtimeMinutes, normalSpeed, strictSpeed }`。采集端每 5 秒刷新配置，到达就寝时间后普通/严格模式的每秒积分改为设定值（`effective_speed()`），`focus-data` 的 `sleep_active` 供界面显示「就寝时段」；在就寝时段内点击结算，`counters.sleep_settles += 1`，对应「乖乖睡觉」纪念章。
+- 损失厌恶效应 · 对赌协议：`psychology.pact = { enabled, ratio（50~100 步进 5）, reward（50~150 步进 5） }`。开启后星图上未来未点亮的星点可点击，弹出 `PactPanel` 设定日期与计划积分，指令 `set_pact` / `cancel_pact`，数据存 `focus-data.json` 的 `pacts`（按日期，含 goal/ratio/reward/status/bonus 快照）。
+- 对赌判定（`evaluate_pacts()`，主循环每 0.5 秒）：当天累计（days + settled）≥ 目标时立即发放 `goal × reward%` 奖励并写回当天累计，`status=done`，`counters.pact_success += 1`，notice 带 `celebrate`；日期过去后仍未达 `goal × ratio%` 则 `deficit += goal`、`status=failed`；达到比例但未到目标记 `partial`（不奖不罚）。
+- 赤字与平账：`focus-data.json` 的 `deficit` 为待偿还总额；专注面板「当前积分」同一行最右侧显示红色发光负数（点击打开 `DeficitPanel`），指令 `pay_deficit` 从当日累计（先未结算 days、后 settled）扣除并等额减少赤字，settled 扣减同步 `cumulative_points` 与 `history`；赤字归零时 `counters.deficit_cleared += 1`，对应「平账大师」纪念章。
+- 全屏礼花：`Celebration.jsx` 用 canvas 绘制三组爆点，颜色取当前 `--accent`，持续约 3 秒；前端轮询 notice 的 `celebrate` 字段触发。
+- 成就扩展：新增「乖乖睡觉（moon）」「平账大师（scale）」「对赌成功（pact）」，判定数据来自 `focus.counters`；8 个成就的纪念章图形在 `AchievementHall.jsx` 的 `MedalArt` 中用 SVG 绘制（星、光点、轨道、河流、光芒、月牙、天平、盾牌对勾）。
+- 版本管理：package.json / package-lock.json 版本号 2.11.0。
+
+**2.10.0 版本要点（成就系统首版）**
+
+- 成就系统：新增 `src/lib/achievements.js`，成就条目集中在 `ACHIEVEMENTS` 表（名称、说明、`metric(ctx)` 累计达成次数）。每次按全部历史重算目标次数，只增不减，因此同一成就可以反复获得（如积分池每满一万加一枚），存档可幂等回算。
+- 判定口径：有效日（达到 L1 阈值的日期数）、当前连续签到、总获积分池、单日达到最高档的天数；数据来自 `displayDays`（含已结算与本轮），不受旅程起始日裁剪。
+- 数据存档：`%LOCALAPPDATA%\StarryFlow\achievements.json`，结构 `{ version: 1, unlocked: { [id]: { count, firstAt, lastAt } } }`；主进程新增 `achievements:get` / `achievements:set`，并纳入备份导出与导入（旧备份没有该字段时不清空已有存档）。
+- 入口：统计栏由 4 列改为 5 列，第五张与「总获积分池 / 连续签到 / 有效天数 / 单日最高」同尺寸，显示已获总枚数与「成就展厅」，点击弹出展厅。
+- 展厅：`AchievementHall.jsx`，`min(1040px, 94vw)` × 88vh 大窗口，沿用设置窗口的遮罩、卡片底色与弹出动画；网格展示已获得的纪念章，按数量降序，标题区显示「已收集 N 种 · 共 M 枚纪念章」，Esc 或点击遮罩关闭。
+- 纪念章：占位视觉（无美术资产），圆盘 + 虚线内圈 + 四芒星，全部使用 `var(--accent)` 与 `color-mix` 派生，随主题色实时变化；徽章上方为锥形光柱（窄顶宽底、由上向下渐隐），下方为地面光晕，名称与获得数量排在徽章下方；卡片入场有 55ms 错峰动画与悬停抬升。
+- 新获得纪念章会复用底部 toast 提示（`获得成就纪念章 · 名称（N 枚）`）；首次加载只补算历史并静默落盘，不刷提示。
+
+**2.9.1 版本要点（本轮迭代汇总）**
+
+- 多进程工作组：进程监视由单选改为最多两个进程，焦点命中任一选中进程即视为专注（`monitor.py` 主循环用 `selected_ids` 集合判定）；旧存档的 `selected_pid` 在 `load_data()` 中自动迁移为 `selected_pids`，同时保留旧字段供兼容。
+- 选择弹窗重做：顶部「工作组」（双进程历史，点击直接勾选并应用）、其下「常用」（单进程历史，胶囊按钮）、最后「全部进程」带勾选框；已选 N/2 显示在底部，超出两个时挤出最早勾选的进程。
+- 选择历史：`settings.json` 新增 `processHistory: { groups: [{ paths, names, count }], singles: [{ path, name, count }] }`，以可执行路径为键，按使用次数降序；`App.jsx` 的 `recordProcessHistory()` 在应用选择时写入，`logic.js` 的 `normalizeProcessHistory()` 负责校验与迁移。
+- 工作组数量：设置 › 规则 › 进程监控可调 3~7（`maxWorkGroups`，默认 3），决定选择列表展示的工作组条数；历史文件内部最多保留 20 条。
+- 双进程显示：专注面板与极简面板的图标框横向展开为两块（`.focus-app-icon.multi`），名称用 ` + ` 连接，副标题显示「2 个进程 · 状态」。
+- 本软件白名单：设置 › 规则新增「将本软件列为默认白名单」（`selfWhitelist`），采集端每 5 秒从 `settings.json` 刷新；开启后焦点落在星流（主进程或其子进程，`is_self_window()`）时不算偏离，普通模式暂停加分、严格模式同样暂停且不倒扣，界面显示「已切换到星流，计时暂停」。
+- 进程弹窗改用 `createPortal` 挂到 `body`：极简面板的 `.focus-panel-compact > * { position: relative }` 会把 `fixed` 遮罩拖进面板内部，导致弹窗溢出到页面下方。
+- 版本管理：package.json / package-lock.json 版本号 2.9.1。
 
 **2.8.1 版本要点（本轮迭代汇总）**
 
@@ -150,13 +199,19 @@ src/
     StarField.jsx      星图矩阵 + 星点 + 印痕卫星（统一时钟）+ 悬停气泡
     SkyBackdrop.jsx    夜空背景（JS 随机星点，两层视差，可整体静止）
     MeteorLayer.jsx    背景流星（可开关）
-    StatsBar.jsx       四张统计卡
-    SettingsWindow.jsx 设置窗口（外观/规则两类，区块卡片 + 逐区块恢复默认 + 数据调试）
+    StatsBar.jsx       统计卡（总获积分池 / 连续签到 / 有效天数 / 单日最高）+ 成就展厅入口
+    AchievementHall.jsx 成就展厅（纪念章网格 + 锥形打光 + 获得数量）
+    PactPanel.jsx      对赌设置弹窗（日期 + 计划积分）
+    DeficitPanel.jsx   赤字平账弹窗
+    WhitelistPicker.jsx 特殊白名单进程多选弹窗
+    Celebration.jsx    对赌达成全屏礼花（canvas）
+    SettingsWindow.jsx 设置窗口（外观 / 规则 / 心理学模型 / 备份与恢复四页，区块卡片 + 逐区块恢复默认 + 数据调试）
     MarkPanel.jsx      印痕弹窗（文字 + 图片 + 右键菜单）
     ImageViewer.jsx    印痕大图查看器（滚轮缩放 / 拖动 / 右键菜单 / Esc）
     ContextMenu.jsx    通用右键菜单
   lib/
     logic.js       逻辑日、档位、渐进解锁、阶段文案、统计、伪随机、HSV 背景色、漂浮/流动档位
+    achievements.js 成就定义表、判定上下文、存档校验与累计次数同步
     mock.js        示例数据生成（演示模式）
 monitor/
   monitor.py       专注模块采集端（Python，需 psutil + pywin32）
@@ -240,9 +295,10 @@ assets/
 
 采集端每 0.5 秒判定前台窗口 PID：
 
-- 焦点在选定进程：累加专注秒数（按整秒结算积分），`focus_lost=false`；
+- 焦点命中 `selected_pids` 中任意一个：累加专注秒数（按整秒结算积分），`focus_lost=false`；
+- 开启「本软件白名单」且焦点在星流（`is_self_window()` 判定主进程或其子进程）：`whitelist_paused=true`，不加分也不算偏离，严格模式同样不扣分；
 - 焦点离开：`focus_lost=true`；非严格模式只重置连击，严格模式每秒扣 `punish_points`；
-- 前端：`focus_lost` 时积分数字变红并发光；严格模式下数字背后的流星特效隐藏，焦点恢复后恢复显示。
+- 前端：`focus_lost` 时积分数字变红并发光；严格模式下数字背后的流星特效隐藏，焦点恢复后恢复显示；`whitelist_paused` 时提示「已切换到星流，计时暂停」。
 
 ---
 
@@ -253,11 +309,12 @@ assets/
 | 文件 | 写入方 | 内容 |
 |---|---|---|
 | `settings.json` | 前端（IPC） | 界面设置，见第 9 节 |
-| `focus-data.json` | 采集端 Python | 专注模块全量状态：`settings`、`days`、`settled`、`settlement_version`、`today_points`、`cumulative_points`、`history`、`allowance`、`selected_pid/name/path`、`running`、`status`、`focus_lost`、`streak_seconds`、`current_speed`、`processes`、`notices` |
+| `focus-data.json` | 采集端 Python | 专注模块全量状态：`settings`、`days`、`settled`、`settlement_version`、`today_points`、`cumulative_points`、`history`、`allowance`、`selected_pids`（兼容旧 `selected_pid/name/path`）、`whitelist_paused`、`running`、`status`、`focus_lost`、`streak_seconds`、`current_speed`、`processes`、`notices`、`psychology`、`sleep_active`、`special_active`、`pacts`、`deficit`、`counters` |
 | `focus-commands\*.json` | 主进程 | 指令队列，一命令一文件；采集端 0.5 秒扫描执行后删除 |
 | `monitor-data.json` | 旧版兼容 | 首次升级时用于迁移 `days`，此后不再写入 |
 | `marks.json` | 前端（IPC） | `{ "YYYY-MM-DD": { text, image, imageData, updatedAt } }` |
 | `marks\*.jpg` | 主进程 | 印痕图片实体文件，文件名 `日期-时间戳.jpg` |
+| `achievements.json` | 前端（IPC） | 成就存档 `{ version, unlocked: { id: { count, firstAt, lastAt } } }` |
 | `window-state.json` | 主进程 | 窗口位置/尺寸/最大化状态（含所在显示器坐标） |
 | `boot.log` | 主进程 | 启动诊断日志 |
 
@@ -288,6 +345,7 @@ window.api = {
   readMarkImage(file) -> dataURL | null,
   deleteMarkImage(file),
   saveMarkImageAs({file, dataUrl}),     // 右键另存为：系统保存对话框
+  getAchievements, setAchievements,     // 成就存档（achievements.json）
   windowControl(action),                // 自绘标题栏：minimize | maximize（已最大化则还原）| close
   isWindowMaximized(),                  // 查询当前是否最大化
   onWindowMaximized(cb)                 // 监听最大化状态变化，返回取消订阅函数
@@ -304,7 +362,7 @@ window.api = {
 
 | action | payload | 说明 |
 |---|---|---|
-| `select` | `{ pid, name, path }` | 选择/清空专注目标；更新路径用于图标与记忆 |
+| `select` | `{ pids: [{ pid, name, path }, ...] }` | 选择专注目标（1~2 个），焦点命中任一即算专注；也兼容旧的 `{ pid, name, path }`；空数组清空选择 |
 | `start` | — | 开始/继续计时 |
 | `pause` | — | 暂停，保留选择 |
 | `settle` | — | 每日结算（见 4.4），会同时停止本轮专注 |
@@ -315,6 +373,8 @@ window.api = {
 | `import` | `{ data }` | 备份导入（整体替换 focus 数据） |
 | `refresh_processes` | — | 立即刷新进程列表 |
 | `adjust_totals` | `{ points, allowance }` | **数据调试**：正负增减已结算积分与额度（下限 0） |
+| `set_pact` / `cancel_pact` | `{ date, goal }` / `{ date }` | 对赌协议：只能设在逻辑日之后的日期，保存 goal/ratio/reward 快照 |
+| `pay_deficit` | `{ amount }` | 平账：从当日累计（先 days 后 settled）扣除并等额减少赤字 |
 
 采集端主循环 0.5 秒：读日切、消费指令、按需刷新进程、焦点判定、按整秒累积积分/扣分、写盘。前端 400ms 轮询状态；开始/暂停/选进程/严格模式采用**乐观更新**，并用 `pendingCommandRef` 在采集端确认前跳过覆盖（1.5 秒超时兜底）。
 
@@ -338,6 +398,12 @@ window.api = {
 | | `sky.flowSpeed` | 3 | **档位 1–5**（基础周期 60/40/28/18/10 秒） |
 | 当日判定 | `dayStartMinutes` | 420 | 新一天起点 |
 | | `settleMinutes` | 240 | **⚠ 仅存在于 UI，无逻辑消费** |
+| 进程监控 | `maxWorkGroups` | 3 | 3~7，选择列表展示的工作组条数（内部最多保留 20 条历史） |
+| | `selfWhitelist` | `false` | 专注期间切到星流不算偏离：普通模式暂停加分，严格模式暂停且不倒扣 |
+| | `processHistory` | `{groups:[],singles:[]}` | 选择历史：双进程工作组与常用单进程，按使用次数降序 |
+| 心理学模型 | `psychology.healthySleep {enabled, bedtimeMinutes, normalSpeed, strictSpeed}` | false / 1410 / 1 / 2 | 健康就寝：到点后普通与严格模式积分速度降为设定值，就寝时段内结算 +1 枚纪念章 |
+| | `psychology.pact {enabled, ratio, reward}` | false / 80 / 100 | 对赌协议：未来星点设目标，达标奖励比例与未达判定比例（50~100、50~150，步进 5） |
+| | `specialWhitelist {enabled, normalSpeed, strictSpeed, items}` | false / 2 / 3 / [] | 特殊白名单：最多 5 个进程（可含本软件），命中后不算偏离、继续积分但降速 |
 | 积分档位 | `tiers[]` | 见 4.2 | 阈值 / 颜色 / 明度 / 发光；设置页单列，色块与选色靠左 |
 | 旅程 | `startDate` | 无 | 起始日，仅用于计算旅程天数、解锁进度与统计范围；界面已无重置入口 |
 | 设置窗口 | `settingsTab` | `appearance` | 上次停留的分类页 |
@@ -436,6 +502,8 @@ window.api = {
 3. **交付前全量文案审查**：清理口语化指令残留、阶段标记、技术内部词；统一用词与量词（星点引导文案已按用户要求改写，其余界面文案仍需复查）。
 4. **托盘与关窗行为（待用户确认）**：当前关窗即退出并结束采集端；若常驻托盘需拦截 `close` + `Tray`。
 5. **低功耗模式（可选）**：降低动画帧率、窗口失焦暂停 canvas 重绘，或提供 `app.disableHardwareAcceleration()` 开关。
+6. **成就条目与美术待定**：`src/lib/achievements.js` 现有 8 个成就（含乖乖睡觉 / 平账大师 / 对赌成功），纪念章图形在 `AchievementHall.jsx` 的 `MedalArt` 中用 SVG 绘制；正式条件与美术确定后替换定义与图形即可。
+7. **2.12.0 未打包**：下次出包需先 `npm run build:monitor` 再 `npm run pack` / `npm run dist`。
 
 ---
 
@@ -462,6 +530,14 @@ window.api = {
 
 | 版本 | 日期 | 内容 |
 |---|---|---|
+| 2.12.0 | 2026-11-03 | 新增特殊白名单：规则设置内最多选 5 个进程（可含本软件），命中后不算偏离、继续积分但按普通/严格模式各自的设定速度降速；设置页胶囊展示与多选弹窗 |
+| 2.11.1 | 2026-11-02 | 「健康就寝模式」「对赌协议」开启时，文案右侧显示主题色发光的「已激活」标记（13px，双层 text-shadow） |
+| 2.11.0 | 2026-11-02 | 设置新增「心理学模型」页：德西效应 · 健康就寝（到点降速、就寝结算得纪念章）；损失厌恶效应 · 对赌协议（未来星点设目标、达标奖励与全屏礼花、未达比例产生赤字、平账得纪念章）；新增三枚成就与 8 种 SVG 纪念章图形 |
+| 2.10.3 | 2026-11-02 | 「成就展厅」入口右下角光晕中心再向右下外移（`right: -86px / bottom: -96px`） |
+| 2.10.2 | 2026-11-02 | 「成就展厅」入口右下角光晕改为更大范围、更强弥散、更低不透明度，光源移到卡片边角之外 |
+| 2.10.1 | 2026-11-02 | 「成就展厅」入口卡片内部右下角增加主题色光晕（径向渐变 + 模糊，悬停增强） |
+| 2.10.0 | 2026-11-02 | 新增成就系统：条件达成自动获得纪念章、可多次获得；右下角「成就展厅」入口与展示窗口（纪念章 + 锥形打光 + 获得数量）；成就存档独立落盘并纳入备份。成就条目与纪念章美术暂为占位 |
+| 2.9.1 | 2026-11-02 | 新增多进程工作组（最多两个进程同时监控，任一命中即专注）；选择列表加入工作组 / 常用历史（按使用频率排序，工作组数量 3~7 可调）；新增「将本软件列为默认白名单」开关（严格模式也暂停不倒扣）；选择弹窗改用 portal 修复极简模式溢出 |
 | 2.8.1 | 2026-11-01 | 积分术语区分：专注面板「本日累计」、数据统计「总获积分池」、设置与采集端「已结算积分」；「本日累计」移到面板底部左侧并与随心额度共用同一套字体配置 |
 | 2.8.0 | 2026-10-31 | 新增极简模式（可缩放竖屏面板、圆环进度、中心星点与积分、面板内星空）与迷你模式（透明置顶浮窗、星点 + 积分、严格模式呼吸光环）；三模式独立记忆位置与尺寸；提示统一为底部 toast；修复迷你配色发脏 |
 | 2.7.0 | 2026-10-31 | 设置新增「备份与恢复」页：积分/额度、印痕文字、印痕图片三项数据路径可查看、打开、更改与恢复默认，导入/导出备份迁入该页；采集端跟随自定义目录；设置窗口切换标签时高度平滑过渡 |

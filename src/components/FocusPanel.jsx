@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { tierIndex, nextTier, tierBrightness, tierGlow, tierHex, seededRandom } from '../lib/logic';
 import { starMotionStyle } from './StarField';
 import SkyBackdrop from './SkyBackdrop';
@@ -63,11 +64,18 @@ export default function FocusPanel({
   onCommand,
   motion,
   sky,
+  processHistory,
+  maxWorkGroups = 3,
+  onPickProcesses,
+  deficit = 0,
+  onPayDeficit,
+  sleepActive = false,
+  specialActive = false,
   variant = 'classic'
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [picked, setPicked] = useState(null);
+  const [pickedPids, setPickedPids] = useState([]);
   const [iconMap, setIconMap] = useState({});
   const iconMapRef = useRef({});
   const iconPending = useRef(new Set());
@@ -75,9 +83,19 @@ export default function FocusPanel({
   const settings = focus?.settings || null;
   const strict = settings?.strict || null;
   const processes = focus?.processes || [];
-  const selectedPid = focus?.selected_pid || null;
   const running = !!focus?.running;
   const focusLost = !!focus?.focus_lost;
+  const whitelistPaused = !!focus?.whitelist_paused;
+
+  // 兼容旧数据：selected_pids 为空时回落到单进程字段
+  const selectedList = useMemo(() => {
+    const list = Array.isArray(focus?.selected_pids) ? focus.selected_pids : [];
+    if (list.length) return list.slice(0, 2);
+    if (focus?.selected_pid) {
+      return [{ pid: focus.selected_pid, name: focus.selected_name || '', path: focus.selected_path || '' }];
+    }
+    return [];
+  }, [focus?.selected_pids, focus?.selected_pid, focus?.selected_name, focus?.selected_path]);
 
   const status = running ? 'focusing' : (focus?.status || 'idle');
 
@@ -93,18 +111,17 @@ export default function FocusPanel({
     ? strict.points_per_sec
     : (running && focus?.current_speed ? focus.current_speed : settings?.base_points_per_sec || 3);
 
-  const selectedProcess = processes.find((p) => p.pid === selectedPid) || null;
-  const currentName = focus?.selected_name || (picked?.pid === selectedPid ? picked.name : '');
-  const currentPath = selectedProcess?.path || focus?.selected_path || (picked?.pid === selectedPid ? picked.path : '');
-  const currentIcon = currentPath ? iconMap[currentPath] : null;
+  const selectedName = selectedList.map((p) => p.name).filter(Boolean).join(' + ');
+  const selectedPaths = selectedList.map((p) => p.path).filter(Boolean);
+  const selectedIconKey = selectedPaths.join('|');
 
-  // 按需取进程图标：信息模块只需当前进程，弹窗打开时补齐整个列表
+  // 按需取进程图标：信息模块只需当前选中的进程，弹窗打开时补齐整个列表
   useEffect(() => {
     const api = window.api;
     if (!api || !api.getProcessIcon) return;
     const wanted = pickerOpen
       ? processes.map((p) => p.path)
-      : [currentPath];
+      : selectedPaths;
     for (const p of wanted) {
       if (!p || iconPending.current.has(p) || p in iconMapRef.current) continue;
       iconPending.current.add(p);
@@ -113,7 +130,7 @@ export default function FocusPanel({
         setIconMap({ ...iconMapRef.current });
       });
     }
-  }, [pickerOpen, processes, currentPath]);
+  }, [pickerOpen, processes, selectedIconKey]);
 
   const options = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -121,19 +138,33 @@ export default function FocusPanel({
       ? processes.filter((p) => `${p.name} ${p.title}`.toLowerCase().includes(q))
       : processes;
     const items = filtered.map((p) => ({ pid: p.pid, name: p.name, title: p.title, path: p.path || '' }));
-    if (selectedPid && !q && !items.some((item) => item.pid === selectedPid)) {
-      items.unshift({
-        pid: selectedPid,
-        name: currentName || `PID ${selectedPid}`,
-        title: '已退出',
-        path: currentPath || ''
+    if (!q) {
+      // 已选中但已退出的进程补在最前，仍可取消勾选
+      selectedList.forEach((p) => {
+        if (!items.some((item) => item.pid === p.pid)) {
+          items.unshift({ pid: p.pid, name: p.name || `PID ${p.pid}`, title: '已退出', path: p.path || '' });
+        }
       });
     }
     return items;
-  }, [processes, query, selectedPid, currentName, currentPath]);
+  }, [processes, query, selectedList]);
+
+  // 历史记录以可执行路径为键，路径缺失时退回进程名
+  const matchKey = (p) => (p.path ? p.path : `name:${p.name}`);
+
+  const workGroups = useMemo(() => {
+    const groups = (processHistory && processHistory.groups) || [];
+    return groups.slice(0, Math.max(3, Math.min(7, Number(maxWorkGroups) || 3)));
+  }, [processHistory, maxWorkGroups]);
+
+  const frequentSingles = useMemo(() => {
+    const singles = (processHistory && processHistory.singles) || [];
+    return singles.slice(0, 5);
+  }, [processHistory]);
 
   const openPicker = () => {
     setPickerOpen(true);
+    setPickedPids(selectedList.map((p) => p.pid));
     if (connected) onCommand('refresh_processes');
   };
 
@@ -142,9 +173,41 @@ export default function FocusPanel({
     setQuery('');
   };
 
-  const choose = (p) => {
-    setPicked({ pid: p.pid, name: p.name, path: p.path });
-    onCommand('select', { pid: p.pid, name: p.name, path: p.path });
+  // 勾选：最多两个，超出时挤掉最早勾选的那个
+  const togglePick = (p) => {
+    setPickedPids((prev) => {
+      if (prev.includes(p.pid)) return prev.filter((id) => id !== p.pid);
+      if (prev.length >= 2) return [...prev.slice(1), p.pid];
+      return [...prev, p.pid];
+    });
+  };
+
+  const applyPicks = () => {
+    const list = pickedPids
+      .map((pid) => options.find((p) => p.pid === pid) || processes.find((p) => p.pid === pid))
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => ({ pid: p.pid, name: p.name, path: p.path || '' }));
+    if (!list.length || !onPickProcesses) return;
+    onPickProcesses(list);
+    closePicker();
+  };
+
+  // 工作组 / 常用项：按路径匹配当前进程后直接应用，省去逐个勾选
+  const applyGroup = (group) => {
+    const list = group.paths
+      .map((key) => processes.find((p) => matchKey(p) === key))
+      .filter(Boolean)
+      .map((p) => ({ pid: p.pid, name: p.name, path: p.path || '' }));
+    if (!list.length || !onPickProcesses) return;
+    onPickProcesses(list);
+    closePicker();
+  };
+
+  const applySingle = (single) => {
+    const p = processes.find((proc) => matchKey(proc) === single.path);
+    if (!p || !onPickProcesses) return;
+    onPickProcesses([{ pid: p.pid, name: p.name, path: p.path || '' }]);
     closePicker();
   };
 
@@ -160,7 +223,7 @@ export default function FocusPanel({
 
   const pickerModal = pickerOpen && (
     <div className="picker-mask" onClick={closePicker}>
-      <div className="picker-window" onClick={(e) => e.stopPropagation()}>
+      <div className="picker-window picker-window-group" onClick={(e) => e.stopPropagation()}>
         <div className="picker-head">
           <span>选择专注进程</span>
           <button className="picker-close" onClick={closePicker}>×</button>
@@ -177,31 +240,114 @@ export default function FocusPanel({
             刷新
           </button>
         </div>
-        <div className="picker-list">
-          {options.map((p) => (
-            <button
-              key={p.pid}
-              className={`picker-item ${p.pid === selectedPid ? 'on' : ''}`}
-              onClick={() => choose(p)}
-            >
-              <span className="picker-item-icon">
-                <ProcessIcon name={p.name} icon={p.path ? iconMap[p.path] : null} />
-              </span>
-              <span className="picker-item-main">
-                <span className="picker-item-name">{p.name}</span>
-                <span className="picker-item-title">{p.title}</span>
-              </span>
-              <span className="picker-item-pid">PID {p.pid}</span>
-            </button>
-          ))}
-          {!options.length && <div className="picker-empty">没有匹配的进程</div>}
+
+        <div className="picker-body">
+          {workGroups.length > 0 && (
+            <div className="picker-section">
+              <div className="picker-section-title">工作组</div>
+              {workGroups.map((g) => {
+                const usable = g.paths.some((key) => processes.some((p) => matchKey(p) === key));
+                return (
+                  <button
+                    key={g.paths.join('|')}
+                    className="group-item"
+                    disabled={!usable}
+                    onClick={() => applyGroup(g)}
+                  >
+                    <span className="group-icons">
+                      {g.paths.map((key) => {
+                        const p = processes.find((proc) => matchKey(proc) === key);
+                        const idx = g.paths.indexOf(key);
+                        return (
+                          <span className="group-icon" key={key}>
+                            <ProcessIcon
+                              name={(p && p.name) || (g.names && g.names[idx]) || ''}
+                              icon={p && p.path ? iconMap[p.path] : null}
+                            />
+                          </span>
+                        );
+                      })}
+                    </span>
+                    <span className="group-names">
+                      {g.paths.map((key, idx) => {
+                        const p = processes.find((proc) => matchKey(proc) === key);
+                        return (p && p.name) || (g.names && g.names[idx]) || '已退出';
+                      }).join(' + ')}
+                    </span>
+                    <span className="group-count">用过 {g.count} 次</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {frequentSingles.length > 0 && (
+            <div className="picker-section">
+              <div className="picker-section-title">常用</div>
+              <div className="frequent-row">
+                {frequentSingles.map((s) => {
+                  const p = processes.find((proc) => matchKey(proc) === s.path);
+                  return (
+                    <button
+                      key={s.path}
+                      className="frequent-item"
+                      disabled={!p}
+                      onClick={() => applySingle(s)}
+                    >
+                      <span className="frequent-icon">
+                        <ProcessIcon name={p ? p.name : s.name} icon={p && p.path ? iconMap[p.path] : null} />
+                      </span>
+                      <span className="frequent-name">{p ? p.name : s.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="picker-section">
+            <div className="picker-section-title">全部进程</div>
+            <div className="picker-list picker-list-group">
+              {options.map((p) => {
+                const checked = pickedPids.includes(p.pid);
+                return (
+                  <button
+                    key={p.pid}
+                    className={`picker-item ${checked ? 'on' : ''}`}
+                    onClick={() => togglePick(p)}
+                  >
+                    <span className={`pick-box ${checked ? 'on' : ''}`}>{checked ? '✓' : ''}</span>
+                    <span className="picker-item-icon">
+                      <ProcessIcon name={p.name} icon={p.path ? iconMap[p.path] : null} />
+                    </span>
+                    <span className="picker-item-main">
+                      <span className="picker-item-name">{p.name}</span>
+                      <span className="picker-item-title">{p.title}</span>
+                    </span>
+                    <span className="picker-item-pid">{p.title === '已退出' ? '已退出' : `PID ${p.pid}`}</span>
+                  </button>
+                );
+              })}
+              {!options.length && <div className="picker-empty">没有匹配的进程</div>}
+            </div>
+          </div>
         </div>
-        <div className="picker-foot">
-          只列出有可见窗口的程序，共 {processes.length} 个
+
+        <div className="picker-foot picker-foot-group">
+          <span className="picker-hint">已选 {pickedPids.length} / 2 · 最多同时监控两个进程</span>
+          <div className="picker-actions">
+            <button className="picker-cancel" onClick={closePicker}>取消</button>
+            <button className="picker-apply" disabled={!pickedPids.length} onClick={applyPicks}>
+              应用选择
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
+
+  // 用 portal 挂到 body：极简面板的 position:relative 会把 fixed 遮罩拖进面板内部
+  const pickerOverlay = pickerModal ? createPortal(pickerModal, document.body) : null;
 
   // 极简模式：圆环进度包裹星点与积分，只保留操作必需信息
   if (variant === 'compact') {
@@ -221,23 +367,33 @@ export default function FocusPanel({
         <MeteorLayer enabled={sky?.animated !== false} />
 
         <div className="compact-head">
-          <span className="focus-app-icon">
-            <ProcessIcon name={currentName} icon={currentIcon} />
+          <span className={`focus-app-icon${selectedList.length > 1 ? ' multi' : ''}`}>
+            {selectedList.length ? (
+              selectedList.map((p, i) => (
+                <span className="focus-app-icon-slot" key={`${p.pid}-${i}`}>
+                  <ProcessIcon name={p.name} icon={p.path ? iconMap[p.path] : null} />
+                </span>
+              ))
+            ) : (
+              <ProcessIcon name="" icon={null} />
+            )}
           </span>
           <span className="focus-app-text">
             <span className="focus-app-name">
-              {connected ? (currentName || '尚未选择进程') : '采集端未连接'}
+              {connected ? (selectedName || '尚未选择进程') : '采集端未连接'}
             </span>
             <span className="focus-app-sub">
               {connected
-                ? (currentName
-                  ? `PID ${selectedPid} · ${STATUS_TEXT[status] || status}`
+                ? (selectedList.length
+                  ? (whitelistPaused
+                    ? '已切换到星流，计时暂停'
+                    : `${selectedList.length > 1 ? `${selectedList.length} 个进程` : `PID ${selectedList[0].pid}`} · ${STATUS_TEXT[status] || status}`)
                   : '选择一个应用作为专注目标')
                 : '专注数据暂不可用'}
             </span>
           </span>
           <button className="focus-pick-btn" disabled={!connected} onClick={openPicker}>
-            {currentName ? '更换进程' : '选择进程'}
+            {selectedList.length ? '更换进程' : '选择进程'}
           </button>
         </div>
 
@@ -320,11 +476,14 @@ export default function FocusPanel({
         {focus?.penalty_active && (
           <div className="focus-warn">{focus?.warn_message || '已离开专注进程，积分正在扣除'}</div>
         )}
+        {whitelistPaused && !focusLost && (
+          <div className="focus-warn whitelist">已切换到星流，计时暂停</div>
+        )}
 
         <div className="compact-buttons">
           <button
             className={`focus-main-btn${!running && status !== 'paused' ? ' solid' : ''}`}
-            disabled={!connected || (!selectedPid && !running)}
+            disabled={!connected || (!selectedList.length && !running)}
             onClick={toggleRun}
           >
             {running ? '暂停计时' : status === 'paused' ? '继续专注' : '开始专注'}
@@ -338,7 +497,7 @@ export default function FocusPanel({
           </button>
         </div>
 
-        {pickerModal}
+        {pickerOverlay}
       </div>
     );
   }
@@ -347,23 +506,33 @@ export default function FocusPanel({
     <div className="focus-panel card">
       <div className="focus-head">
         <div className="focus-app">
-          <span className="focus-app-icon">
-            <ProcessIcon name={currentName} icon={currentIcon} />
+          <span className={`focus-app-icon${selectedList.length > 1 ? ' multi' : ''}`}>
+            {selectedList.length ? (
+              selectedList.map((p, i) => (
+                <span className="focus-app-icon-slot" key={`${p.pid}-${i}`}>
+                  <ProcessIcon name={p.name} icon={p.path ? iconMap[p.path] : null} />
+                </span>
+              ))
+            ) : (
+              <ProcessIcon name="" icon={null} />
+            )}
           </span>
           <span className="focus-app-text">
             <span className="focus-app-name">
-              {connected ? (currentName || '尚未选择进程') : '采集端未连接'}
+              {connected ? (selectedName || '尚未选择进程') : '采集端未连接'}
             </span>
             <span className="focus-app-sub">
               {connected
-                ? (currentName
-                  ? `PID ${selectedPid} · ${STATUS_TEXT[status] || status}`
+                ? (selectedList.length
+                  ? (whitelistPaused
+                    ? '已切换到星流，计时暂停'
+                    : `${selectedList.length > 1 ? `${selectedList.length} 个进程` : `PID ${selectedList[0].pid}`} · ${STATUS_TEXT[status] || status}`)
                   : '选择一个应用作为专注目标')
                 : '专注数据暂不可用'}
             </span>
           </span>
           <button className="focus-pick-btn" disabled={!connected} onClick={openPicker}>
-            {currentName ? '更换进程' : '选择进程'}
+            {selectedList.length ? '更换进程' : '选择进程'}
           </button>
         </div>
 
@@ -391,16 +560,28 @@ export default function FocusPanel({
           <span className={`live-dot ${running ? 'on' : ''}`} />
           <span className="live-text">{STATUS_TEXT[status] || status}</span>
         </div>
-        <div className="focus-number-wrap">
-          {strict?.enabled && !focusLost && <StrictMeteors />}
-          <div
-            className={`focus-number${focusLost ? ' lost' : ''}`}
-            style={!focusLost && level >= 0
-              ? { color: tierHex(starColor, level, tier), filter: `brightness(${tierBrightness(tier, level)})` }
-              : {}}
-          >
-            {todayPoints.toLocaleString()}
+        <div className="focus-value-row">
+          <div className="focus-number-wrap">
+            {strict?.enabled && !focusLost && <StrictMeteors />}
+            <div
+              className={`focus-number${focusLost ? ' lost' : ''}`}
+              style={!focusLost && level >= 0
+                ? { color: tierHex(starColor, level, tier), filter: `brightness(${tierBrightness(tier, level)})` }
+                : {}}
+            >
+              {todayPoints.toLocaleString()}
+            </div>
           </div>
+          {deficit > 0 && (
+            <button
+              type="button"
+              className="focus-deficit"
+              onClick={onPayDeficit}
+              title="点击平账"
+            >
+              -{deficit.toLocaleString()}
+            </button>
+          )}
         </div>
         <div className="focus-sub">
           {level >= 0
@@ -455,6 +636,8 @@ export default function FocusPanel({
         </div>
         <div className="focus-meta">
           <span>当前速度 {speed} 积分/秒</span>
+          {sleepActive && <span className="focus-sleep-tag">就寝时段</span>}
+          {specialActive && <span className="focus-special-tag">特殊白名单</span>}
           {strict?.enabled && (
             <>
               <span className="focus-dot">·</span>
@@ -464,6 +647,9 @@ export default function FocusPanel({
         </div>
         {focus?.penalty_active && (
           <div className="focus-warn">{focus?.warn_message || '已离开专注进程，积分正在扣除'}</div>
+        )}
+        {whitelistPaused && !focusLost && (
+          <div className="focus-warn whitelist">已切换到星流，计时暂停</div>
         )}
       </div>
 
@@ -484,7 +670,7 @@ export default function FocusPanel({
         <div className="focus-buttons">
           <button
             className={`focus-main-btn${!running && status !== 'paused' ? ' solid' : ''}`}
-            disabled={!connected || (!selectedPid && !running)}
+            disabled={!connected || (!selectedList.length && !running)}
             onClick={toggleRun}
           >
             {running ? '暂停计时' : status === 'paused' ? '继续专注' : '开始专注'}

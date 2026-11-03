@@ -68,6 +68,31 @@ export const DEFAULT_SETTINGS = {
     followPoints: true,      // 积分越高夜空流动越快
     flowSpeed: 3             // 流动速度档位 1-5，越高越快
   },
+  maxWorkGroups: 3,          // 进程列表里保留的工作组数量 3 ~ 7
+  selfWhitelist: false,      // 专注期间切到本软件时暂停计时、不算偏离
+  processHistory: {          // 进程选择历史：双进程工作组 + 常用单进程
+    groups: [],
+    singles: []
+  },
+  psychology: {              // 心理学模型：健康就寝与对赌协议
+    healthySleep: {
+      enabled: false,
+      bedtimeMinutes: 23 * 60 + 30,  // 健康就寝时间，到点后积分速度降为下面两档
+      normalSpeed: 1,
+      strictSpeed: 2
+    },
+    pact: {
+      enabled: false,
+      ratio: 80,             // 当日累计需达到目标的比例（50 ~ 100，步进 5）
+      reward: 100            // 达成后额外奖励占目标的比例（50 ~ 150，步进 5）
+    }
+  },
+  specialWhitelist: {        // 特殊白名单：焦点落在这些软件上时不算偏离，但积分速度降低
+    enabled: false,
+    normalSpeed: 2,          // 普通模式下的白名单积分速度
+    strictSpeed: 3,          // 严格模式下的白名单积分速度
+    items: []                // 最多 5 个：{ name, path, self }
+  },
   settingsTab: 'appearance'  // 设置窗口上次停留的分类
 };
 
@@ -145,7 +170,13 @@ export function mergeSettings(saved) {
     : (Number.isFinite(rawDuration) ? durationToLevel(rawDuration) : base.sky.flowSpeed);
   delete out.sky.baseDuration;
   out.background = { ...base.background, ...(saved.background || {}) };
-  out.settingsTab = ['rules', 'backup'].includes(saved.settingsTab) ? saved.settingsTab : 'appearance';
+  out.psychology = mergePsychology(saved.psychology);
+  out.specialWhitelist = mergeSpecialWhitelist(saved.specialWhitelist);
+  out.settingsTab = ['rules', 'backup', 'psychology'].includes(saved.settingsTab) ? saved.settingsTab : 'appearance';
+  const rawMax = Number(saved.maxWorkGroups);
+  out.maxWorkGroups = Number.isFinite(rawMax) ? Math.max(3, Math.min(7, Math.round(rawMax))) : base.maxWorkGroups;
+  out.selfWhitelist = saved.selfWhitelist === true;
+  out.processHistory = normalizeProcessHistory(saved.processHistory);
 
   if (Array.isArray(saved.tiers) && saved.tiers.length) {
     out.tiers = saved.tiers.map((t, i) => ({
@@ -155,6 +186,109 @@ export function mergeSettings(saved) {
       glow: Number.isFinite(Number(t.glow)) ? Number(t.glow) : base.tiers[i].glow
     }));
   }
+  return out;
+}
+
+// 特殊白名单：最多 5 个进程，允许包含本软件自身；按路径去重
+function mergeSpecialWhitelist(raw) {
+  const base = DEFAULT_SETTINGS.specialWhitelist;
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const items = [];
+  const seen = new Set();
+
+  const take = (item) => {
+    if (!item || typeof item !== 'object' || items.length >= 5) return;
+    const isSelf = item.self === true;
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    const path = typeof item.path === 'string' ? item.path.trim() : '';
+    if (!isSelf && !name) return;
+    const key = isSelf ? '__self__' : (path.toLowerCase() || `name:${name.toLowerCase()}`);
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push(isSelf
+      ? { name: name || 'Starry Flow', path: '', self: true }
+      : { name, path, self: false });
+  };
+
+  if (Array.isArray(src.items)) src.items.forEach(take);
+
+  const speed = (value, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(1, Math.round(n)) : fallback;
+  };
+
+  return {
+    enabled: src.enabled === true,
+    normalSpeed: speed(src.normalSpeed, base.normalSpeed),
+    strictSpeed: speed(src.strictSpeed, base.strictSpeed),
+    items
+  };
+}
+
+// 心理学模型：范围与步进校验，缺失字段用默认值补齐
+function mergePsychology(raw) {
+  const base = DEFAULT_SETTINGS.psychology;
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const sleep = src.healthySleep && typeof src.healthySleep === 'object' ? src.healthySleep : {};
+  const pact = src.pact && typeof src.pact === 'object' ? src.pact : {};
+  const clampNum = (value, min, max, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  };
+  const step5 = (value, min, max, fallback) => Math.round(clampNum(value, min, max, fallback) / 5) * 5;
+
+  return {
+    healthySleep: {
+      enabled: sleep.enabled === true,
+      bedtimeMinutes: Math.round(clampNum(sleep.bedtimeMinutes, 0, 1439, base.healthySleep.bedtimeMinutes)),
+      normalSpeed: Math.max(1, Math.round(clampNum(sleep.normalSpeed, 1, 999, base.healthySleep.normalSpeed))),
+      strictSpeed: Math.max(1, Math.round(clampNum(sleep.strictSpeed, 1, 999, base.healthySleep.strictSpeed)))
+    },
+    pact: {
+      enabled: pact.enabled === true,
+      ratio: step5(pact.ratio, 50, 100, base.pact.ratio),
+      reward: step5(pact.reward, 50, 150, base.pact.reward)
+    }
+  };
+}
+
+// 进程选择历史：只保留形如 { paths:[a,b], names:[...], count } 的工作组与单进程常用项
+function normalizeProcessHistory(raw) {
+  const out = { groups: [], singles: [] };
+  if (!raw || typeof raw !== 'object') return out;
+
+  if (Array.isArray(raw.groups)) {
+    raw.groups.forEach((g) => {
+      if (!g || typeof g !== 'object') return;
+      const paths = Array.isArray(g.paths)
+        ? g.paths.filter((p) => typeof p === 'string' && p).slice(0, 2)
+        : [];
+      if (paths.length !== 2) return;
+      const names = Array.isArray(g.names) ? g.names.map((n) => String(n || '')).slice(0, 2) : [];
+      out.groups.push({
+        paths,
+        names,
+        count: Math.max(1, Math.round(Number(g.count) || 1))
+      });
+    });
+    out.groups.sort((a, b) => b.count - a.count);
+    out.groups = out.groups.slice(0, 20);
+  }
+
+  if (Array.isArray(raw.singles)) {
+    raw.singles.forEach((s) => {
+      if (!s || typeof s !== 'object' || !s.path) return;
+      out.singles.push({
+        path: String(s.path),
+        name: String(s.name || ''),
+        count: Math.max(1, Math.round(Number(s.count) || 1))
+      });
+    });
+    out.singles.sort((a, b) => b.count - a.count);
+    out.singles = out.singles.slice(0, 20);
+  }
+
   return out;
 }
 

@@ -236,7 +236,18 @@ function Star({ dateKey, points, tiers, isToday, isFuture, shape, color, motion,
   );
 }
 
-export default function StarField({ days, tiers, todayKey, startDateKey, settings, marks, onSelectDay }) {
+export default function StarField({
+  days,
+  tiers,
+  todayKey,
+  startDateKey,
+  settings,
+  marks,
+  onSelectDay,
+  pactEnabled = false,
+  pacts = {},
+  onPactDay
+}) {
   const [tip, setTip] = useState(null);
   const { starShape, starColor, starMotion } = settings;
 
@@ -277,13 +288,17 @@ export default function StarField({ days, tiers, todayKey, startDateKey, setting
               const level = tierIndex(cell.points, tiers);
               const lit = level >= 0;
               const hasMark = Boolean(marks && marks[cell.key]);
-              const clickable = lit && !cell.isFuture && Boolean(onSelectDay);
+              const hasPact = Boolean(pacts && pacts[cell.key] && pacts[cell.key].status === 'pending');
+              // 已点亮的过去日期用于写印痕；未来未点亮的星点在开启对赌后可点击设目标
+              const markTarget = lit && !cell.isFuture && Boolean(onSelectDay);
+              const pactTarget = cell.isFuture && !lit && pactEnabled && Boolean(onPactDay);
+              const clickable = markTarget || pactTarget;
 
               return (
                 <div
                   key={cell.key}
-                  className={`star-slot ${clickable ? 'is-clickable' : ''}`}
-                  onClick={clickable ? () => onSelectDay(cell.key) : undefined}
+                  className={`star-slot ${clickable ? 'is-clickable' : ''} ${pactTarget ? 'is-pact-target' : ''}`}
+                  onClick={clickable ? () => (pactTarget ? onPactDay(cell.key) : onSelectDay(cell.key)) : undefined}
                   onMouseEnter={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     setTip({
@@ -295,6 +310,8 @@ export default function StarField({ days, tiers, todayKey, startDateKey, setting
                       isFuture: cell.isFuture,
                       isToday: cell.isToday,
                       hasMark,
+                      hasPact,
+                      pactTarget,
                       clickable
                     });
                   }}
@@ -310,6 +327,7 @@ export default function StarField({ days, tiers, todayKey, startDateKey, setting
                     color={starColor}
                     motion={starMotion}
                   >
+                    {hasPact && <span className="pact-dot" aria-hidden="true" />}
                     {hasMark && (
                       <OrbitTrail
                         period={orbitPeriod(settings.orbit.speed)}
@@ -348,8 +366,11 @@ export default function StarField({ days, tiers, todayKey, startDateKey, setting
             )}
           </div>
           {tip.hasMark && <div className="tip-mark">此处有印痕</div>}
+          {tip.hasPact && <div className="tip-pact">已立下对赌</div>}
           {tip.clickable && (
-            <div className="tip-hint">{tip.hasMark ? '点击查看印痕' : '点击写下印痕'}</div>
+            <div className="tip-hint">
+              {tip.pactTarget ? '点击设置对赌' : (tip.hasMark ? '点击查看印痕' : '点击写下印痕')}
+            </div>
           )}
         </div>
       )}

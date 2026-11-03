@@ -27,6 +27,10 @@ SETTINGS_FILE = os.environ.get("STARRY_FLOW_SETTINGS_FILE") or os.path.join(BASE
 LEGACY_MONITOR_FILE = os.path.join(DATA_DIR, "monitor-data.json")
 MUTEX_NAME = "StarryFlowFocusMonitor"
 SELF_PID = os.environ.get("STARRY_FLOW_SELF_PID")
+try:
+    SELF_PID_INT = int(SELF_PID) if SELF_PID else None
+except (TypeError, ValueError):
+    SELF_PID_INT = None
 
 
 def default_settings():
@@ -61,7 +65,10 @@ def default_data():
         "selected_pid": None,
         "selected_name": None,
         "selected_path": None,
+        # 多进程监控：最多 2 个，焦点命中任意一个都算专注
+        "selected_pids": [],
         "selected_alive": False,
+        "whitelist_paused": False,
         "running": False,
         "status": "idle",
         "focus_lost": False,
@@ -71,8 +78,109 @@ def default_data():
         "warn_message": None,
         "processes": [],
         "notices": [],
-        "updated_at": None
+        "updated_at": None,
+        # 心理学模型：健康就寝与对赌协议
+        "psychology": default_psychology(),
+        "day_start_minutes": 7 * 60,
+        "sleep_active": False,
+        "special_active": False,
+        "pacts": {},
+        "deficit": 0,
+        "counters": {
+            "sleep_settles": 0,
+            "pact_success": 0,
+            "deficit_cleared": 0
+        }
     }
+
+
+def default_psychology():
+    """与前端 DEFAULT_SETTINGS.psychology 保持同一份默认值。"""
+    return {
+        "healthySleep": {
+            "enabled": False,
+            "bedtimeMinutes": 23 * 60 + 30,
+            "normalSpeed": 1,
+            "strictSpeed": 2
+        },
+        "pact": {
+            "enabled": False,
+            "ratio": 80,
+            "reward": 100
+        }
+    }
+
+
+def sanitize_psychology(raw):
+    """外部设置只接受约定结构，范围与步进与界面一致。"""
+    base = default_psychology()
+    src = raw if isinstance(raw, dict) else {}
+    sleep = src.get("healthySleep") if isinstance(src.get("healthySleep"), dict) else {}
+    pact = src.get("pact") if isinstance(src.get("pact"), dict) else {}
+
+    def clamp(value, low, high, fallback):
+        v = num(value, fallback)
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return fallback
+        return max(low, min(high, v))
+
+    ratio = int(round(clamp(pact.get("ratio"), 50, 100, base["pact"]["ratio"]) / 5.0) * 5)
+    reward = int(round(clamp(pact.get("reward"), 50, 150, base["pact"]["reward"]) / 5.0) * 5)
+    return {
+        "healthySleep": {
+            "enabled": sleep.get("enabled") is True,
+            "bedtimeMinutes": int(round(clamp(sleep.get("bedtimeMinutes"), 0, 1439, base["healthySleep"]["bedtimeMinutes"]))),
+            "normalSpeed": max(1, int(round(clamp(sleep.get("normalSpeed"), 1, 999, base["healthySleep"]["normalSpeed"])))),
+            "strictSpeed": max(1, int(round(clamp(sleep.get("strictSpeed"), 1, 999, base["healthySleep"]["strictSpeed"]))))
+        },
+        "pact": {
+            "enabled": pact.get("enabled") is True,
+            "ratio": ratio,
+            "reward": reward
+        }
+    }
+
+
+def in_sleep_window(now, sleep_cfg, day_start_minutes):
+    """就寝时段：从就寝时间起，跨过逻辑日边界直到新一天开始。"""
+    minutes = now.hour * 60 + now.minute
+    bedtime = int(num((sleep_cfg or {}).get("bedtimeMinutes"), 23 * 60 + 30))
+    return minutes >= bedtime or minutes < day_start_minutes
+
+
+def clean_pacts(raw):
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for date, item in raw.items():
+        if not isinstance(item, dict):
+            continue
+        key = str(date)
+        goal = int(max(0, num(item.get("goal"), 0)))
+        if goal <= 0:
+            continue
+        status = item.get("status")
+        if status not in ("pending", "done", "failed", "partial"):
+            status = "pending"
+        out[key] = {
+            "goal": goal,
+            "ratio": int(max(50, min(100, num(item.get("ratio"), 80)))),
+            "reward": int(max(50, min(150, num(item.get("reward"), 100)))),
+            "status": status,
+            "bonus": int(max(0, num(item.get("bonus"), 0))),
+            "created_at": str(item.get("created_at") or "")
+        }
+    return out
+
+
+def clean_counters(raw):
+    base = {"sleep_settles": 0, "pact_success": 0, "deficit_cleared": 0}
+    if isinstance(raw, dict):
+        for key in base:
+            base[key] = int(max(0, num(raw.get(key), 0)))
+    return base
 
 
 def load_json(path):
@@ -142,6 +250,53 @@ def merge_settings(saved):
     return out
 
 
+def clean_selected(raw):
+    """校验进程集合：最多两个、去重、字段规整。"""
+    clean = []
+    if not isinstance(raw, list):
+        return clean
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        pid = item.get("pid")
+        if not pid:
+            continue
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if any(p["pid"] == pid for p in clean):
+            continue
+        clean.append({
+            "pid": pid,
+            "name": str(item.get("name") or ""),
+            "path": str(item.get("path") or "")
+        })
+        if len(clean) >= 2:
+            break
+    return clean
+
+
+def sync_selected(data):
+    """selected_pids 为正本，旧版单进程字段同步第一个，兼容旧界面逻辑。"""
+    first = data["selected_pids"][0] if data["selected_pids"] else None
+    data["selected_pid"] = first["pid"] if first else None
+    data["selected_name"] = first["name"] if first else None
+    data["selected_path"] = first["path"] if first else None
+
+
+def is_self_window(pid):
+    """判断前台窗口是否属于本软件（主进程或其渲染子进程）。"""
+    if not pid or not SELF_PID_INT:
+        return False
+    if int(pid) == SELF_PID_INT:
+        return True
+    try:
+        return psutil.Process(int(pid)).ppid() == SELF_PID_INT
+    except (psutil.Error, ValueError, TypeError):
+        return False
+
+
 def load_data():
     fresh = default_data()
     saved = load_json(FOCUS_FILE)
@@ -158,6 +313,15 @@ def load_data():
             fresh["history"] = []
         if not isinstance(fresh["notices"], list):
             fresh["notices"] = []
+        # 兼容旧版单进程选择：把 selected_pid 迁移成 selected_pids
+        fresh["selected_pids"] = clean_selected(fresh.get("selected_pids"))
+        if not fresh["selected_pids"] and fresh.get("selected_pid"):
+            fresh["selected_pids"] = clean_selected([{
+                "pid": fresh.get("selected_pid"),
+                "name": fresh.get("selected_name"),
+                "path": fresh.get("selected_path")
+            }])
+        sync_selected(fresh)
         # 旧版结算把当日原积分留在 days 里，升级时剔除已结算部分，避免与 settled 重复计数；该迁移只执行一次
         if num(saved.get("settlement_version"), 0) < 2:
             for k, v in list(fresh["days"].items()):
@@ -165,6 +329,14 @@ def load_data():
                 if already > 0:
                     fresh["days"][k] = max(0, num(v, 0) - already)
             fresh["settlement_version"] = 2
+        # 心理学模型相关状态：旧存档缺少时补默认值，避免类型漂移
+        fresh["psychology"] = sanitize_psychology(fresh.get("psychology"))
+        fresh["pacts"] = clean_pacts(fresh.get("pacts"))
+        fresh["deficit"] = int(max(0, num(fresh.get("deficit"), 0)))
+        fresh["counters"] = clean_counters(fresh.get("counters"))
+        fresh["day_start_minutes"] = int(max(0, num(fresh.get("day_start_minutes"), 7 * 60)))
+        fresh["sleep_active"] = fresh.get("sleep_active") is True
+        fresh["special_active"] = fresh.get("special_active") is True
         return fresh
 
     # 首次升级：把旧版纯采集数据（monitor-data.json）的每日积分接过来，
@@ -249,13 +421,86 @@ def points_for_second(settings, streak_seconds):
     return segments[-1][1]
 
 
-def add_notice(data, ok, message):
-    data["notices"].append({
+def effective_speed(data, streak_seconds):
+    """普通/严格模式的速度，若正处于健康就寝时段则改用设定值。"""
+    settings = data["settings"]
+    speed = points_for_second(settings, streak_seconds)
+    psych = data.get("psychology") or default_psychology()
+    sleep_cfg = psych.get("healthySleep") or {}
+    if sleep_cfg.get("enabled") and in_sleep_window(
+        datetime.datetime.now(), sleep_cfg, int(num(data.get("day_start_minutes"), 7 * 60))
+    ):
+        key = "strictSpeed" if settings["strict"]["enabled"] else "normalSpeed"
+        speed = int(max(1, num(sleep_cfg.get(key), speed)))
+    return speed
+
+
+def sanitize_special_whitelist(raw):
+    """特殊白名单：最多 5 个进程，允许包含本软件自身，按路径去重。"""
+    items = []
+    seen = set()
+    src = raw if isinstance(raw, dict) else {}
+    for item in (src.get("items") or [])[:12]:
+        if not isinstance(item, dict) or len(items) >= 5:
+            continue
+        is_self = item.get("self") is True
+        name = str(item.get("name") or "").strip()
+        path = str(item.get("path") or "").strip()
+        if not is_self and not name:
+            continue
+        key = "__self__" if is_self else (path.lower() or ("name:" + name.lower()))
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({
+            "name": name or "Starry Flow",
+            "path": "" if is_self else path,
+            "self": is_self
+        })
+    return {
+        "enabled": src.get("enabled") is True,
+        "normalSpeed": max(1, int(num(src.get("normalSpeed"), 2))),
+        "strictSpeed": max(1, int(num(src.get("strictSpeed"), 3))),
+        "items": items
+    }
+
+
+def in_special_whitelist(fg_pid, cfg):
+    """焦点是否落在特殊白名单进程上；命中后不算偏离但积分降速。"""
+    if not cfg.get("enabled") or not cfg.get("items") or not fg_pid:
+        return False
+    items = cfg["items"]
+    if any(item.get("self") for item in items) and is_self_window(fg_pid):
+        return True
+    paths = {
+        os.path.normcase(str(item.get("path")))
+        for item in items
+        if item.get("path")
+    }
+    if not paths:
+        return False
+    try:
+        exe = psutil.Process(int(fg_pid)).exe()
+    except (psutil.Error, ValueError, TypeError, OSError):
+        return False
+    return os.path.normcase(str(exe)) in paths
+
+
+def special_whitelist_speed(settings, cfg):
+    key = "strictSpeed" if settings["strict"]["enabled"] else "normalSpeed"
+    return int(max(1, num(cfg.get(key), 2)))
+
+
+def add_notice(data, ok, message, celebrate=False):
+    item = {
         "id": int(time.time() * 1000),
         "ok": bool(ok),
         "message": message,
         "time": datetime.datetime.now().isoformat(timespec="seconds")
-    })
+    }
+    if celebrate:
+        item["celebrate"] = True
+    data["notices"].append(item)
     data["notices"] = data["notices"][-8:]
 
 
@@ -276,6 +521,59 @@ def settle_into_cumulative(data, date_key):
     return points
 
 
+def evaluate_pacts(data, today_key, psychology):
+    """对赌判定：当天达标立即发奖；过期未达判定比例则产生等额赤字。"""
+    pact_cfg = (psychology or default_psychology()).get("pact") or {}
+    if not pact_cfg.get("enabled"):
+        return
+    pacts = data.get("pacts")
+    if not isinstance(pacts, dict) or not pacts:
+        return
+
+    for date in sorted(pacts.keys()):
+        item = pacts[date]
+        if not isinstance(item, dict) or item.get("status") != "pending":
+            continue
+        if date > today_key:
+            continue
+        goal = int(num(item.get("goal"), 0))
+        if goal <= 0:
+            continue
+        total = int(num(data["days"].get(date), 0)) + int(num(data["settled"].get(date), 0))
+        ratio = int(num(item.get("ratio"), 80))
+        reward_pct = int(num(item.get("reward"), 100))
+
+        if total >= goal:
+            bonus = int(round(goal * reward_pct / 100.0))
+            if date == today_key:
+                data["days"][date] = int(num(data["days"].get(date), 0)) + bonus
+            else:
+                # 错过的日期在日切后才达标：奖励补记到那一天的已结算积分
+                data["settled"][date] = int(num(data["settled"].get(date), 0)) + bonus
+                data["cumulative_points"] = int(num(data["cumulative_points"], 0)) + bonus
+                for record in data["history"]:
+                    if isinstance(record, dict) and record.get("date") == date:
+                        record["points"] = data["settled"][date]
+            item["status"] = "done"
+            item["bonus"] = bonus
+            data["counters"]["pact_success"] = int(num(data["counters"].get("pact_success"), 0)) + 1
+            add_notice(
+                data, True,
+                "对赌达成：%s 目标 %d 积分，额外奖励 %d 积分。" % (date, goal, bonus),
+                celebrate=True
+            )
+        elif date < today_key and total < goal * ratio / 100.0:
+            data["deficit"] = int(num(data.get("deficit"), 0)) + goal
+            item["status"] = "failed"
+            add_notice(
+                data, False,
+                "对赌未达成：%s 累计 %d，未到目标的 %d%%，欠下 %d 赤字积分。" % (date, total, ratio, goal)
+            )
+        elif date < today_key:
+            # 达到判定比例但没到目标：不奖励也不产生赤字
+            item["status"] = "partial"
+
+
 # ---------- 命令处理 ----------
 def handle_command(data, cmd, key):
     action = (cmd or {}).get("action")
@@ -283,25 +581,28 @@ def handle_command(data, cmd, key):
     settings = data["settings"]
 
     if action == "select":
-        pid = payload.get("pid")
-        name = payload.get("name") or ""
+        raw = payload.get("pids")
+        if not isinstance(raw, list):
+            raw = [{"pid": payload.get("pid"), "name": payload.get("name"), "path": payload.get("path")}]
+        selected = clean_selected(raw)
         if data["running"]:
             data["running"] = False
             data["status"] = "paused"
-        data["selected_pid"] = int(pid) if pid else None
-        data["selected_name"] = name if pid else None
-        data["selected_path"] = (str(payload.get("path") or "") or None) if pid else None
+        data["selected_pids"] = selected
+        sync_selected(data)
+        data["selected_alive"] = bool(selected) and any(psutil.pid_exists(p["pid"]) for p in selected)
         data["streak_seconds"] = 0
         data["current_speed"] = 0
         data["focus_lost"] = False
         data["penalty_active"] = False
+        data["whitelist_paused"] = False
         data["warn_message"] = None
-        if not pid:
+        if not selected:
             data["status"] = "idle"
         return
 
     if action == "start":
-        if not data["selected_pid"]:
+        if not data["selected_pids"]:
             add_notice(data, False, "请先选择一个应用")
             return
         data["running"] = True
@@ -310,7 +611,7 @@ def handle_command(data, cmd, key):
         data["streak_seconds"] = 0
         data["penalty_active"] = False
         data["warn_message"] = None
-        data["current_speed"] = points_for_second(settings, 1)
+        data["current_speed"] = effective_speed(data, 1)
         return
 
     if action == "pause":
@@ -349,7 +650,90 @@ def handle_command(data, cmd, key):
         data["focus_lost"] = False
         data["penalty_active"] = False
         data["warn_message"] = None
+        # 健康就寝：就寝时段内点击结算，记一次「乖乖睡觉」纪念章
+        sleep_cfg = (data.get("psychology") or default_psychology()).get("healthySleep") or {}
+        if sleep_cfg.get("enabled") and in_sleep_window(
+            datetime.datetime.now(), sleep_cfg, int(num(data.get("day_start_minutes"), 7 * 60))
+        ):
+            counters = data["counters"]
+            counters["sleep_settles"] = int(num(counters.get("sleep_settles"), 0)) + 1
         add_notice(data, True, "已存入已结算积分 %d，今日共结算 %d 积分。" % (delta, num(data["settled"].get(key, 0), 0)))
+        return
+
+    if action == "set_pact":
+        psych = data.get("psychology") or default_psychology()
+        pact_cfg = psych.get("pact") or {}
+        if not pact_cfg.get("enabled"):
+            add_notice(data, False, "请先在设置中开启对赌协议。")
+            return
+        date = str(payload.get("date") or "")
+        goal = int(max(0, num(payload.get("goal"), 0)))
+        if len(date) != 10 or date[4] != "-" or date[7] != "-":
+            add_notice(data, False, "请选择有效的日期。")
+            return
+        if date <= key:
+            add_notice(data, False, "对赌只能设在未来日期。")
+            return
+        if goal <= 0:
+            add_notice(data, False, "计划积分需大于 0。")
+            return
+        data["pacts"][date] = {
+            "goal": goal,
+            "ratio": int(num(pact_cfg.get("ratio"), 80)),
+            "reward": int(num(pact_cfg.get("reward"), 100)),
+            "status": "pending",
+            "bonus": 0,
+            "created_at": datetime.datetime.now().isoformat(timespec="seconds")
+        }
+        add_notice(data, True, "已立下 %s 的对赌：目标 %d 积分。" % (date, goal))
+        return
+
+    if action == "cancel_pact":
+        date = str(payload.get("date") or "")
+        item = data["pacts"].get(date)
+        if not isinstance(item, dict) or item.get("status") != "pending":
+            add_notice(data, False, "没有可取消的对赌。")
+            return
+        if date <= key:
+            add_notice(data, False, "这一天已经开始，无法取消。")
+            return
+        del data["pacts"][date]
+        add_notice(data, True, "已取消 %s 的对赌。" % date)
+        return
+
+    if action == "pay_deficit":
+        amount = int(max(0, num(payload.get("amount"), 0)))
+        deficit = int(num(data.get("deficit"), 0))
+        if deficit <= 0:
+            add_notice(data, False, "当前没有赤字积分。")
+            return
+        if amount <= 0:
+            add_notice(data, False, "请输入要偿还的积分。")
+            return
+        day_points = int(num(data["days"].get(key), 0))
+        settled_today = int(num(data["settled"].get(key), 0))
+        pay = min(amount, deficit, day_points + settled_today)
+        if pay <= 0:
+            add_notice(data, False, "当日累计积分为 0，暂时无法偿还。")
+            return
+        from_days = min(day_points, pay)
+        data["days"][key] = day_points - from_days
+        rest = pay - from_days
+        if rest > 0:
+            data["settled"][key] = max(0, settled_today - rest)
+            data["cumulative_points"] = max(0, int(num(data["cumulative_points"], 0)) - rest)
+            for record in data["history"]:
+                if isinstance(record, dict) and record.get("date") == key:
+                    record["points"] = data["settled"][key]
+        data["deficit"] = max(0, deficit - pay)
+        if data["deficit"] == 0:
+            counters = data["counters"]
+            counters["deficit_cleared"] = int(num(counters.get("deficit_cleared"), 0)) + 1
+            add_notice(data, True, "赤字已全部填平，获得「平账大师」纪念章 ×1。")
+        elif pay < amount:
+            add_notice(data, True, "当日累计不足，已偿还 %d，剩余赤字 %d。" % (pay, data["deficit"]))
+        else:
+            add_notice(data, True, "已偿还 %d，剩余赤字 %d。" % (pay, data["deficit"]))
         return
 
     if action == "adjust_totals":
@@ -367,7 +751,7 @@ def handle_command(data, cmd, key):
 
     if action == "update_settings":
         data["settings"] = merge_settings(payload.get("settings"))
-        data["current_speed"] = points_for_second(data["settings"], max(1, data["streak_seconds"])) if data["running"] else 0
+        data["current_speed"] = effective_speed(data, max(1, data["streak_seconds"])) if data["running"] else 0
         if not data["settings"]["strict"]["enabled"]:
             data["penalty_active"] = False
             data["warn_message"] = None
@@ -375,7 +759,7 @@ def handle_command(data, cmd, key):
 
     if action == "set_strict":
         data["settings"]["strict"]["enabled"] = bool(payload.get("enabled"))
-        data["current_speed"] = points_for_second(data["settings"], max(1, data["streak_seconds"])) if data["running"] else 0
+        data["current_speed"] = effective_speed(data, max(1, data["streak_seconds"])) if data["running"] else 0
         if not payload.get("enabled"):
             data["penalty_active"] = False
             data["warn_message"] = None
@@ -423,14 +807,14 @@ def handle_command(data, cmd, key):
         data["today_points"] = num(data["days"].get(key, 0), 0)
         data["running"] = False
         data["status"] = "idle"
-        data["selected_pid"] = None
-        data["selected_name"] = None
-        data["selected_path"] = None
+        data["selected_pids"] = []
+        sync_selected(data)
         data["selected_alive"] = False
         data["streak_seconds"] = 0
         data["current_speed"] = 0
         data["focus_lost"] = False
         data["penalty_active"] = False
+        data["whitelist_paused"] = False
         data["warn_message"] = None
         add_notice(data, True, "备份已导入，采集已暂停，请重新选择进程。")
         return
@@ -487,17 +871,21 @@ def main():
     data["notices"] = []
 
     # 恢复上次选中的进程：PID 仍存在且进程名一致时才保留，避免 PID 复用误认
-    restored = False
-    pid = data.get("selected_pid")
-    if pid:
+    alive = []
+    for item in data["selected_pids"]:
         try:
-            proc = psutil.Process(int(pid))
-            name = proc.name()
-            if proc.is_running() and name.lower() == str(data.get("selected_name") or "").lower():
-                restored = True
-                data["selected_name"] = name
+            proc = psutil.Process(int(item["pid"]))
+            if proc.is_running() and proc.name().lower() == str(item.get("name") or "").lower():
+                alive.append({
+                    "pid": int(item["pid"]),
+                    "name": proc.name(),
+                    "path": str(item.get("path") or "")
+                })
         except (psutil.Error, ValueError, TypeError):
-            restored = False
+            continue
+    data["selected_pids"] = alive[:2]
+    sync_selected(data)
+    restored = bool(alive)
     if restored:
         # 今日已结算且本轮没有新增积分时，重启后直接显示「开始专注」
         shared = load_json(SETTINGS_FILE)
@@ -510,14 +898,25 @@ def main():
         data["status"] = "idle" if settled_today > 0 and today_points == 0 else "paused"
         data["selected_alive"] = True
     else:
-        data["selected_pid"] = None
-        data["selected_name"] = None
-        data["selected_path"] = None
         data["selected_alive"] = False
         data["status"] = "idle"
 
     day_start = 7 * 60
     day_start_loaded_at = 0
+    self_whitelist = False
+    psychology = default_psychology()
+    special_whitelist = sanitize_special_whitelist(None)
+    shared_now = load_json(SETTINGS_FILE)
+    if isinstance(shared_now, dict):
+        day_start = max(0, num(shared_now.get("dayStartMinutes"), day_start))
+        psychology = sanitize_psychology(shared_now.get("psychology"))
+        special_whitelist = sanitize_special_whitelist(shared_now.get("specialWhitelist"))
+    data["day_start_minutes"] = day_start
+    data["psychology"] = psychology
+    data["sleep_active"] = bool(
+        psychology["healthySleep"]["enabled"]
+        and in_sleep_window(datetime.datetime.now(), psychology["healthySleep"], day_start)
+    )
     last_process_refresh = 0
     last_mono = time.monotonic()
     focus_seconds = 0.0
@@ -537,7 +936,21 @@ def main():
                 shared = load_json(SETTINGS_FILE)
                 if isinstance(shared, dict):
                     day_start = max(0, num(shared.get("dayStartMinutes"), day_start))
+                    # 本软件白名单开关由界面写入 settings.json，这里定期刷新
+                    self_whitelist = bool(shared.get("selfWhitelist"))
+                    psychology = sanitize_psychology(shared.get("psychology"))
+                    data["psychology"] = psychology
+                    special_whitelist = sanitize_special_whitelist(shared.get("specialWhitelist"))
+                data["day_start_minutes"] = day_start
                 day_start_loaded_at = time.time()
+
+            # 就寝时段内界面提示计时降速
+            data["sleep_active"] = bool(
+                psychology["healthySleep"]["enabled"]
+                and in_sleep_window(now, psychology["healthySleep"], day_start)
+            )
+            # 特殊白名单命中标记每轮先归零，命中时再置真
+            data["special_active"] = False
 
             key = logical_date_key(now, day_start)
             check_day_rollover(data, key)
@@ -545,18 +958,23 @@ def main():
             # 指令与状态刷新跑在 0.5 秒周期内，点击后能更快被采集端响应
             consume_commands(data, key)
 
+            # 对赌：当天达标即时发奖，过期的在日切后判定赤字
+            evaluate_pacts(data, key, psychology)
+
             if time.time() - last_process_refresh > 3:
                 data["processes"] = list_gui_processes()
                 last_process_refresh = time.time()
-                pid = data["selected_pid"]
-                data["selected_alive"] = bool(pid) and psutil.pid_exists(pid)
+                data["selected_alive"] = any(psutil.pid_exists(p["pid"]) for p in data["selected_pids"])
 
-            if data["running"] and data["selected_pid"]:
+            if data["running"] and data["selected_pids"]:
                 fg_pid = get_foreground_pid()
                 strict = data["settings"]["strict"]
-                if fg_pid == data["selected_pid"]:
+                selected_ids = {p["pid"] for p in data["selected_pids"]}
+                if fg_pid and fg_pid in selected_ids:
+                    # 焦点命中工作区内任意一个进程都算专注
                     data["focus_lost"] = False
                     data["penalty_active"] = False
+                    data["whitelist_paused"] = False
                     data["warn_message"] = None
                     away_seconds = 0.0
                     focus_seconds += delta
@@ -564,11 +982,38 @@ def main():
                     while focus_seconds >= 1.0:
                         focus_seconds -= 1.0
                         data["streak_seconds"] += 1
-                        speed = points_for_second(data["settings"], data["streak_seconds"])
+                        speed = effective_speed(data, data["streak_seconds"])
+                        data["current_speed"] = speed
+                        data["days"][key] = num(data["days"].get(key, 0), 0) + speed
+                elif self_whitelist and is_self_window(fg_pid):
+                    # 本软件白名单：暂停计时，不算偏离，严格模式也不倒扣
+                    data["focus_lost"] = False
+                    data["penalty_active"] = False
+                    data["whitelist_paused"] = True
+                    data["warn_message"] = None
+                    focus_seconds = 0.0
+                    away_seconds = 0.0
+                    data["streak_seconds"] = 0
+                    data["current_speed"] = 0
+                    data["status"] = "focusing"
+                elif in_special_whitelist(fg_pid, special_whitelist):
+                    # 特殊白名单：不算偏离，积分照常累积，但按设定速度降速
+                    data["focus_lost"] = False
+                    data["penalty_active"] = False
+                    data["whitelist_paused"] = False
+                    data["special_active"] = True
+                    data["warn_message"] = None
+                    away_seconds = 0.0
+                    focus_seconds += delta
+                    while focus_seconds >= 1.0:
+                        focus_seconds -= 1.0
+                        data["streak_seconds"] += 1
+                        speed = special_whitelist_speed(data["settings"], special_whitelist)
                         data["current_speed"] = speed
                         data["days"][key] = num(data["days"].get(key, 0), 0) + speed
                 else:
                     # 不论是否严格模式，只要焦点脱离就标记，界面据此显示警示
+                    data["whitelist_paused"] = False
                     data["focus_lost"] = True
                     focus_seconds = 0.0
                     data["streak_seconds"] = 0
@@ -588,6 +1033,7 @@ def main():
                     data["status"] = "focusing"
             else:
                 data["focus_lost"] = False
+                data["whitelist_paused"] = False
                 focus_seconds = 0.0
                 away_seconds = 0.0
 

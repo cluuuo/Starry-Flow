@@ -46,6 +46,7 @@ let FOCUS_FILE;
 let COMMAND_DIR;
 let MARKS_FILE;
 let MARKS_DIR;
+let ACHIEVEMENTS_FILE;
 let WINDOW_STATE_FILE;
 
 // storage.json 只记录用户改过路径的项，留空即使用默认目录
@@ -86,6 +87,7 @@ function initPaths() {
   BASE_DIR = path.join(getLocalAppData(), 'StarryFlow');
   STORAGE_FILE = path.join(BASE_DIR, 'storage.json');
   SETTINGS_FILE = path.join(BASE_DIR, 'settings.json');
+  ACHIEVEMENTS_FILE = path.join(BASE_DIR, 'achievements.json');
   WINDOW_STATE_FILE = path.join(BASE_DIR, 'window-state.json');
   applyStorage(resolveStorage(readStorageOptions()));
   console.log('[main] BASE_DIR =', BASE_DIR, '| DATA_DIR =', DATA_DIR);
@@ -618,6 +620,9 @@ app.whenReady().then(() => {
   ipcMain.handle('window:get-mode', () => currentMode);
   ipcMain.handle('window:set-mode', (_event, mode) => setWindowMode(mode));
 
+  // 版本号直接取打包/开发时 package.json 的 version，升版后界面自动同步
+  ipcMain.handle('app:version', () => app.getVersion());
+
   // 迷你窗口：点击切回极简，或拖动整窗移动
   ipcMain.on('mini:activate', () => setWindowMode('compact'));
   ipcMain.on('mini:drag-start', () => {
@@ -656,6 +661,13 @@ app.whenReady().then(() => {
 
   ipcMain.handle('marks:set', (_event, marks) => {
     return writeJsonSafe(MARKS_FILE, marks || {});
+  });
+
+  // 成就存档：前端负责判定，主进程只做落盘
+  ipcMain.handle('achievements:get', () => readJsonSafe(ACHIEVEMENTS_FILE) || {});
+
+  ipcMain.handle('achievements:set', (_event, data) => {
+    return writeJsonSafe(ACHIEVEMENTS_FILE, data || {});
   });
 
   // 图片单独落盘，月份文件里只存文件名，避免 JSON 膨胀
@@ -924,7 +936,8 @@ app.whenReady().then(() => {
         exported_at: new Date().toISOString(),
         focus: readJsonSafe(FOCUS_FILE),
         settings: readJsonSafe(SETTINGS_FILE),
-        marks: readJsonSafe(MARKS_FILE)
+        marks: readJsonSafe(MARKS_FILE),
+        achievements: readJsonSafe(ACHIEVEMENTS_FILE)
       };
       fs.writeFileSync(res.filePath, JSON.stringify(payload, null, 2), 'utf-8');
       return { ok: true, path: res.filePath };
@@ -954,6 +967,10 @@ app.whenReady().then(() => {
       }
       if (raw.marks && typeof raw.marks === 'object') {
         writeJsonSafe(MARKS_FILE, raw.marks);
+      }
+      // 旧备份没有成就存档，存在时才覆盖，避免清空已有纪念章
+      if (raw.achievements && typeof raw.achievements === 'object') {
+        writeJsonSafe(ACHIEVEMENTS_FILE, raw.achievements);
       }
       enqueueFocusCommand('import', { data: focus });
       return {
