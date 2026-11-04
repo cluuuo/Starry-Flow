@@ -172,8 +172,16 @@ function collectMarkImages(marks) {
   return images;
 }
 
-function buildBackupPayload() {
+// includeImages=false 时只带印痕文字，图片留在本地（云备份可选，节省流量）
+// 同时去掉 image 字段，避免恢复后指向新设备上并不存在的图片
+function buildBackupPayload(includeImages = true) {
   const marks = readJsonSafe(MARKS_FILE) || {};
+  const marksOut = includeImages
+    ? marks
+    : Object.fromEntries(Object.entries(marks).map(([key, mark]) => [
+      key,
+      { ...(mark && typeof mark === 'object' ? mark : {}), image: null }
+    ]));
   return {
     app: 'Starry Flow',
     format: BACKUP_FORMAT,
@@ -181,8 +189,8 @@ function buildBackupPayload() {
     exported_at: new Date().toISOString(),
     focus: readJsonSafe(FOCUS_FILE),
     settings: readJsonSafe(SETTINGS_FILE),
-    marks,
-    marksImages: collectMarkImages(marks),
+    marks: marksOut,
+    marksImages: includeImages ? collectMarkImages(marks) : {},
     achievements: readJsonSafe(ACHIEVEMENTS_FILE)
   };
 }
@@ -255,7 +263,9 @@ function readWebdavConfig() {
   return {
     url: typeof saved.url === 'string' ? saved.url : '',
     username: typeof saved.username === 'string' ? saved.username : '',
-    password
+    password,
+    // 印痕图片体积占备份九成以上，默认随备份上传，可关闭以节省流量
+    includeImages: saved.includeImages !== false
   };
 }
 
@@ -266,7 +276,8 @@ function saveWebdavConfig(patch) {
   const next = {
     url: typeof src.url === 'string' ? src.url.trim() : prev.url,
     username: typeof src.username === 'string' ? src.username.trim() : prev.username,
-    password: typeof src.password === 'string' && src.password ? src.password : prev.password
+    password: typeof src.password === 'string' && src.password ? src.password : prev.password,
+    includeImages: src.includeImages === undefined ? prev.includeImages : src.includeImages === true
   };
   let encrypted = false;
   let password = '';
@@ -289,6 +300,7 @@ function saveWebdavConfig(patch) {
     username: next.username,
     password,
     encrypted,
+    includeImages: next.includeImages,
     updated_at: new Date().toISOString()
   });
   return next;
@@ -355,12 +367,15 @@ function davSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 503/429 多为服务端临时限流，等一会儿重试一次；网络抖动也重试一次
-async function davRequest(cfg, target, options = {}) {
+// 503/429 多为服务端临时限流，间隔逐步拉长后重试；网络抖动同样重试
+// 每次请求都写进 boot.log，出现 503 时可以据此确认到底卡在哪一步
+async function davRequest(cfg, target, options = {}, maxAttempts = 3) {
+  const label = `${(options.method || 'GET').toUpperCase()} ${target}`;
   let lastError = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), WEBDAV_TIMEOUT);
+    const started = Date.now();
     try {
       const res = await fetch(target, {
         ...options,
@@ -372,16 +387,18 @@ async function davRequest(cfg, target, options = {}) {
           ...(options.headers || {})
         }
       });
-      if ((res.status === 503 || res.status === 429) && attempt === 0) {
+      bootLog(`[webdav] ${label} -> ${res.status} (${Date.now() - started}ms, 第 ${attempt + 1} 次)`);
+      if ((res.status === 503 || res.status === 429) && attempt < maxAttempts - 1) {
         try { await res.text(); } catch (e) { /* 丢弃响应体 */ }
-        await davSleep(1200);
+        await davSleep(attempt === 0 ? 1500 : 3000);
         continue;
       }
       return res;
     } catch (e) {
       lastError = e;
-      if (attempt === 0) {
-        await davSleep(800);
+      bootLog(`[webdav] ${label} -> 失败 ${e && e.message ? e.message : e} (第 ${attempt + 1} 次)`);
+      if (attempt < maxAttempts - 1) {
+        await davSleep(attempt === 0 ? 1000 : 2000);
         continue;
       }
       throw e;
@@ -392,9 +409,9 @@ async function davRequest(cfg, target, options = {}) {
   throw lastError || new Error('WebDAV 请求失败');
 }
 
-async function davCall(cfg, target, options) {
+async function davCall(cfg, target, options, maxAttempts) {
   try {
-    return { res: await davRequest(cfg, target, options) };
+    return { res: await davRequest(cfg, target, options, maxAttempts) };
   } catch (e) {
     return {
       error: e && e.name === 'AbortError'
@@ -411,7 +428,7 @@ function davStatusText(status) {
   if (status === 405) return '服务器不支持该操作（可能未开启 WebDAV）';
   if (status === 409) return '云端目录不存在且无法自动创建';
   if (status === 429) return '请求过于频繁，云端已限流，请稍后再试';
-  if (status === 503) return '云端暂时不可用（HTTP 503），请稍后重试；坚果云可能触发了请求频率限制';
+  if (status === 503) return '云端暂时不可用（HTTP 503），已自动重试仍失败。请等 1-2 分钟再试；若持续出现，请确认坚果云服务是否正常或账号是否被临时限流';
   if (status === 507) return '云端空间不足';
   return `云端返回 HTTP ${status}`;
 }
@@ -443,12 +460,15 @@ async function davCreateCollectionChain(cfg, base) {
   for (let i = start; i < segments.length; i += 1) {
     path += `/${segments[i]}`;
     const target = `${u.origin}${path}/`;
-    let { res, error } = await davCall(cfg, target, { method: 'MKCOL' });
+    // 建目录只重试一次：重复 MKCOL 在限流时只会加重服务端负担
+    let { res, error } = await davCall(cfg, target, { method: 'MKCOL' }, 2);
     if (error) return { error };
     if (res.status === 503) {
-      // 限流时多等一会儿再试一次
+      // 目录可能本来就存在，部分服务对重复 MKCOL 回 503：先探测确认，真的不存在才重试
+      const probe = await davProbeCollection(cfg, target);
+      if (probe.ok) continue;
       await davSleep(1500);
-      ({ res, error } = await davCall(cfg, target, { method: 'MKCOL' }));
+      ({ res, error } = await davCall(cfg, target, { method: 'MKCOL' }, 2));
       if (error) return { error };
     }
     // 201 创建成功；405 已存在；409/403 交给调用方复查判断
@@ -1466,7 +1486,18 @@ function bootstrap() {
   // ---------- WebDAV 云备份：测试 / 上传 / 列表 / 恢复 ----------
   ipcMain.handle('webdav:get', () => {
     const cfg = readWebdavConfig();
-    return { url: cfg.url, username: cfg.username, hasPassword: Boolean(cfg.password) };
+    return {
+      url: cfg.url,
+      username: cfg.username,
+      hasPassword: Boolean(cfg.password),
+      includeImages: cfg.includeImages !== false
+    };
+  });
+
+  // 只改备份选项（印痕图片是否上传），不触碰账号密码
+  ipcMain.handle('webdav:option', (_event, patch) => {
+    const cfg = saveWebdavConfig(patch);
+    return { ok: true, includeImages: cfg.includeImages !== false };
   });
 
   ipcMain.handle('webdav:test', async (_event, patch) => {
@@ -1499,12 +1530,10 @@ function bootstrap() {
     const cfg = saveWebdavConfig(patch);
     const invalid = davValidate(cfg);
     if (invalid) return { ok: false, error: invalid };
-    // 先把目标目录确保好：目录刚创建、服务端还没同步时直接 PUT 会返回 404
-    const dir = davBackupDirectory(cfg);
-    const ensured = await davEnsureCollection(cfg, dir.url);
-    if (ensured.error) return { ok: false, error: ensured.error };
 
-    const payload = buildBackupPayload();
+    const dir = davBackupDirectory(cfg);
+    // 按云备份设置决定是否带上印痕图片，关闭时只传文字与数据
+    const payload = buildBackupPayload(cfg.includeImages !== false);
     const body = JSON.stringify(payload, null, 2);
     const name = `StarryFlow-backup-${backupStamp()}.json`;
     const target = davDirFileUrl(dir.url, name);
@@ -1513,16 +1542,31 @@ function bootstrap() {
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body
     });
+
+    // 直接写入：目录通常已经存在，一次 PUT 就够。
+    // 先探测再写入会多一个 PROPFIND，云端限流时更容易被误判成“不可用”
     let { res, error } = await put();
     if (error) return { ok: false, error };
+
     if (res.status === 404 || res.status === 409) {
-      // 有些服务对不存在的目录也回 207，导致探测误判为“已存在”；
-      // 这里强制补建一次目录，等待同步后再重试写入
-      const forced = await davCreateCollectionChain(cfg, dir.url);
-      if (forced.error) return { ok: false, error: forced.error };
+      // 目录不存在或不完整：补建后再写一次
+      const ensured = await davEnsureCollection(cfg, dir.url);
+      if (ensured.error) return { ok: false, error: ensured.error };
       await new Promise((r) => setTimeout(r, 800));
       ({ res, error } = await put());
       if (error) return { ok: false, error };
+    } else if (res.status === 503) {
+      // 只有当探测明确显示目录不存在（404）时才补建；
+      // 目录存在却 503 说明云端本身不可用，再发建目录请求只会加重限流
+      const probe = await davProbeCollection(cfg, dir.url);
+      if (!probe.error && probe.status === 404) {
+        const ensured = await davEnsureCollection(cfg, dir.url);
+        if (!ensured.error) {
+          await new Promise((r) => setTimeout(r, 1000));
+          ({ res, error } = await put());
+          if (error) return { ok: false, error };
+        }
+      }
     }
     if (!res.ok) {
       let detail = '';

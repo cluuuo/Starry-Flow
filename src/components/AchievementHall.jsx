@@ -1,4 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+
+// 上次获得时间：统一成「2026-11-04 23:12」，旧存档没记录时显示破折号
+function formatTime(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  const d = new Date(n);
+  if (Number.isNaN(d.getTime())) return '—';
+  const p = (v) => String(v).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 // 纪念章中心的星形与星图保持同一轮廓
 const STAR_PATH = 'M50 7 C54 30 65 41 93 50 C65 59 54 70 50 93 C46 70 35 59 7 50 C35 41 46 30 50 7 Z';
@@ -109,8 +119,14 @@ function MedalArt({ art }) {
 }
 
 export default function AchievementHall({ open, medals, onClose }) {
+  // 悬停提示：显示获得条件与上次获得时间，用 fixed 定位避免被卡片裁掉
+  const [tip, setTip] = useState(null);
+
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      setTip(null);
+      return undefined;
+    }
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
     };
@@ -119,6 +135,8 @@ export default function AchievementHall({ open, medals, onClose }) {
   }, [open, onClose]);
 
   if (!open) return null;
+
+  const tipItem = tip ? medals.find((m) => m.id === tip.id) : null;
 
   const kinds = medals.length;
   const total = medals.reduce((sum, item) => sum + item.count, 0);
@@ -148,7 +166,21 @@ export default function AchievementHall({ open, medals, onClose }) {
           {kinds ? (
             <div className="achievement-grid">
               {medals.map((item, index) => (
-                <div className="medal-card" key={item.id} style={{ '--i': index }}>
+                <div
+                  className="medal-card"
+                  key={item.id}
+                  style={{ '--i': index }}
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTip({
+                      id: item.id,
+                      x: rect.left + rect.width / 2,
+                      top: rect.top,
+                      bottom: rect.bottom
+                    });
+                  }}
+                  onMouseLeave={() => setTip((cur) => (cur && cur.id === item.id ? null : cur))}
+                >
                   <div className="medal-stage">
                     <span className="medal-beam" aria-hidden="true" />
                     <span className="medal-floor" aria-hidden="true" />
@@ -175,6 +207,18 @@ export default function AchievementHall({ open, medals, onClose }) {
             </div>
           )}
         </div>
+
+        {tipItem && (
+          <div
+            className={`medal-tooltip ${tip.top < 290 ? 'below' : ''}`}
+            style={tip.top < 290
+              ? { left: tip.x, top: tip.bottom + 8 }
+              : { left: tip.x, top: tip.top - 8 }}
+          >
+            <div className="medal-tooltip-desc">{tipItem.desc}</div>
+            <div className="medal-tooltip-time">上次获得 {formatTime(tipItem.lastAt)}</div>
+          </div>
+        )}
       </div>
     </div>
   );

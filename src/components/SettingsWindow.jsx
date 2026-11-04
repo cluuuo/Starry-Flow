@@ -1205,13 +1205,18 @@ export default function SettingsWindow({
                       按 {exchangeRate.toLocaleString()} 积分 / 1 {allowanceName}
                     </span>
                   </div>
+                  <div className="exchange-stat">
+                    <span className="exchange-stat-label">当前存有{allowanceName}</span>
+                    <span className="exchange-stat-value">{allowance.toLocaleString()}</span>
+                    <span className="exchange-stat-hint">已兑换、可用于花费的{allowanceName}</span>
+                  </div>
                 </div>
 
                 <div className="field-row">
                   <label>{allowanceName}名称</label>
                   <input
                     type="text"
-                    className="focus-text-input"
+                    className="focus-text-input exchange-name-input"
                     value={allowanceName}
                     onChange={(e) => updateFocus({ allowance_name: e.target.value })}
                   />
@@ -1219,54 +1224,67 @@ export default function SettingsWindow({
 
                 <div className="field-row">
                   <label>兑换比例</label>
-                  <input
-                    type="number"
-                    className="focus-number-input"
-                    min={1}
-                    step={100}
-                    value={fset.exchange_rate}
-                    onChange={(e) => updateFocus({ exchange_rate: Math.max(1, Number(e.target.value) || 0) })}
-                  />
-                  <span className="field-hint">积分 / 1 {allowanceName}</span>
-                </div>
-
-                <div className="field-row">
-                  <label>当前{allowanceName}</label>
-                  <span className="focus-value-text">{allowance.toLocaleString()} {allowanceName}</span>
+                  <span className="exchange-inline">
+                    <input
+                      type="number"
+                      className="focus-number-input"
+                      min={1}
+                      step={100}
+                      value={fset.exchange_rate}
+                      onChange={(e) => updateFocus({ exchange_rate: Math.max(1, Number(e.target.value) || 0) })}
+                    />
+                    <span className="field-hint">积分 / 1 {allowanceName}</span>
+                  </span>
                 </div>
 
                 <div className="field-row">
                   <label>兑换</label>
-                  <input
-                    type="number"
-                    className="focus-number-input"
-                    min={1}
-                    max={Math.max(1, maxExchange)}
-                    value={exchangeAmount}
-                    onChange={(e) => setExchangeAmount(Math.max(1, Number(e.target.value) || 1))}
-                  />
-                  <span className="focus-seg-text">{allowanceName}</span>
-                  <button
-                    className="focus-mini-btn"
-                    onClick={() => onFocusCommand && onFocusCommand('exchange', { amount: exchangeAmount })}
-                  >
-                    兑换
-                  </button>
+                  <span className="exchange-control">
+                    <input
+                      type="number"
+                      className="focus-number-input"
+                      min={1}
+                      max={Math.max(1, maxExchange)}
+                      value={exchangeAmount}
+                      onChange={(e) => setExchangeAmount(Math.max(1, Number(e.target.value) || 1))}
+                    />
+                    <span className="focus-seg-text">{allowanceName}</span>
+                    <span className="exchange-actions">
+                      <button
+                        className="focus-mini-btn ghost"
+                        disabled={maxExchange < 1}
+                        title={`把可用积分兑换成 ${maxExchange.toLocaleString()} ${allowanceName}`}
+                        onClick={() => onFocusCommand && onFocusCommand('exchange', { amount: maxExchange })}
+                      >
+                        全部兑换
+                      </button>
+                      <button
+                        className="focus-mini-btn"
+                        onClick={() => onFocusCommand && onFocusCommand('exchange', { amount: exchangeAmount })}
+                      >
+                        兑换
+                      </button>
+                    </span>
+                  </span>
                 </div>
 
                 <div className="field-row">
                   <label>花费</label>
-                  <input
-                    type="number"
-                    className="focus-number-input"
-                    min={1}
-                    value={spendAmount}
-                    onChange={(e) => setSpendAmount(Math.max(1, Number(e.target.value) || 1))}
-                  />
-                  <span className="focus-seg-text">{allowanceName}</span>
-                  <button className="focus-mini-btn" onClick={() => onFocusCommand && onFocusCommand('spend', { amount: spendAmount })}>
-                    花费
-                  </button>
+                  <span className="exchange-control">
+                    <input
+                      type="number"
+                      className="focus-number-input"
+                      min={1}
+                      value={spendAmount}
+                      onChange={(e) => setSpendAmount(Math.max(1, Number(e.target.value) || 1))}
+                    />
+                    <span className="focus-seg-text">{allowanceName}</span>
+                    <span className="exchange-actions">
+                      <button className="focus-mini-btn" onClick={() => onFocusCommand && onFocusCommand('spend', { amount: spendAmount })}>
+                        花费
+                      </button>
+                    </span>
+                  </span>
                 </div>
               </div>
             </div>

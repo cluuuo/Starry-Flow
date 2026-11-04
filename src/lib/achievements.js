@@ -146,13 +146,18 @@ export function syncAchievements(state, ctx, now = Date.now()) {
   return { state: { version: 1, unlocked }, gained };
 }
 
-// 展厅只展示已经获得的纪念章，按累计数量降序排列
+// 展厅只展示已经获得的纪念章，按累计数量降序排列；带上获得时间供悬停查看
 export function earnedAchievements(state) {
   const unlocked = (state && state.unlocked) || {};
-  return ACHIEVEMENTS.map((item) => ({
-    ...item,
-    count: (unlocked[item.id] && unlocked[item.id].count) || 0
-  }))
+  return ACHIEVEMENTS.map((item) => {
+    const record = unlocked[item.id] || null;
+    return {
+      ...item,
+      count: (record && record.count) || 0,
+      firstAt: (record && record.firstAt) || 0,
+      lastAt: (record && record.lastAt) || 0
+    };
+  })
     .filter((item) => item.count > 0)
     .sort((a, b) => b.count - a.count);
 }

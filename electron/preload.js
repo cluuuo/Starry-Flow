@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   setAchievements: (data) => ipcRenderer.invoke('achievements:set', data),
   // WebDAV 云备份：配置只保存地址与账号，密码由主进程加密落盘
   getWebdavConfig: () => ipcRenderer.invoke('webdav:get'),
+  setWebdavOption: (patch) => ipcRenderer.invoke('webdav:option', patch),
   testWebdav: (cfg) => ipcRenderer.invoke('webdav:test', cfg),
   uploadWebdav: (cfg) => ipcRenderer.invoke('webdav:upload', cfg),
   listWebdav: () => ipcRenderer.invoke('webdav:list'),

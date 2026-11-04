@@ -2529,6 +2529,38 @@ body::before {
   font-variant-numeric: tabular-nums;
 }
 
+/* 纪念章悬停提示：获得条件 + 上次获得时间 */
+.medal-tooltip {
+  position: fixed;
+  z-index: 140;
+  transform: translate(-50%, -100%);
+  max-width: 240px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: rgba(10, 15, 28, 0.96);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.55;
+  pointer-events: none;
+  animation: fade-in 0.12s ease;
+}
+
+/* 第一行卡片上方空间不够时改到卡片下方，避免挡住展厅标题 */
+.medal-tooltip.below {
+  transform: translate(-50%, 0);
+}
+
+.medal-tooltip-desc {
+  color: var(--text);
+}
+
+.medal-tooltip-time {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .achievement-empty {
   display: flex;
   flex-direction: column;
@@ -3523,6 +3555,67 @@ body::before {
   font-variant-numeric: tabular-nums;
 }
 
+/* 积分兑换页：控件统一靠右成组，输入框与按钮两行对齐 */
+.exchange-name-input {
+  width: 190px;
+  text-align: left;
+}
+
+.exchange-inline,
+.exchange-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.exchange-inline .field-hint {
+  margin-left: 0;
+}
+
+.exchange-control .focus-number-input {
+  width: 86px;
+}
+
+.exchange-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 156px;
+}
+
+.exchange-actions .focus-mini-btn {
+  margin-left: 0;
+}
+
+/* 次要操作按钮：只描边，不抢主按钮的视觉重量 */
+.focus-mini-btn.ghost {
+  background: none;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.focus-mini-btn.ghost:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--text);
+}
+
+.focus-mini-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 数字输入框去掉上下增减箭头：可以直接键入数值，箭头只会占位碍眼 */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .focus-mini-btn {
   margin-left: auto;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -3622,7 +3715,7 @@ body::before {
 /* ---------- 积分兑换 ---------- */
 .exchange-stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }

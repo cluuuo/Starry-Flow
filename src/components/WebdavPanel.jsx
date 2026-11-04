@@ -6,6 +6,7 @@ export default function WebdavPanel({ onRestored }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
+  const [includeImages, setIncludeImages] = useState(true);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const [listOpen, setListOpen] = useState(false);
@@ -24,9 +25,24 @@ export default function WebdavPanel({ onRestored }) {
       setUrl(cfg.url || '');
       setUsername(cfg.username || '');
       setHasPassword(Boolean(cfg.hasPassword));
+      setIncludeImages(cfg.includeImages !== false);
     }).catch(() => { /* 读取失败时留空 */ });
     return () => { alive = false; };
   }, [available]);
+
+  // 印痕图片开关：保存到云备份配置，立即生效于下次上传
+  const handleToggleImages = async () => {
+    const next = !includeImages;
+    setIncludeImages(next);
+    setMsg(null);
+    if (api && api.setWebdavOption) {
+      const res = await api.setWebdavOption({ includeImages: next });
+      if (!res || res.ok === false) {
+        setIncludeImages(!next);
+        fail('保存备份设置失败');
+      }
+    }
+  };
 
   const payload = () => ({ url, username, password });
   const fail = (text) => setMsg({ ok: false, text: text || '操作失败' });
@@ -146,6 +162,23 @@ export default function WebdavPanel({ onRestored }) {
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setMsg(null); }}
               />
+            </div>
+            <div className="webdav-row">
+              <label>印痕图片</label>
+              <button
+                className={`switch ${includeImages ? 'on' : ''}`}
+                onClick={handleToggleImages}
+                role="switch"
+                aria-checked={includeImages}
+                aria-label="印痕图片随备份上传"
+              >
+                <span className="switch-knob" />
+              </button>
+              <span className="field-hint">
+                {includeImages
+                  ? '图片随备份一起上传，换机后印痕可完整还原'
+                  : '只备份文字与数据，图片仅保存在本机，节省上传流量'}
+              </span>
             </div>
           </div>
 
