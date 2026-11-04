@@ -68,6 +68,19 @@ export const DEFAULT_SETTINGS = {
     followPoints: true,      // 积分越高夜空流动越快
     flowSpeed: 3             // 流动速度档位 1-5，越高越快
   },
+  mini: {
+    bgHue: 0,                // 迷你面板底色色相 0-360
+    bgSaturation: 0,         // 饱和度 0-100
+    bgValue: 100,            // 明度 0-100
+    bgAlpha: 34,             // 不透明度 0-100
+    width: 196,              // 面板宽 140-420
+    height: 190,             // 面板高 140-400
+    starFollowTier: true,    // 星点颜色是否跟随积分档位
+    numberFollowTier: false, // 积分数字是否跟随积分档位
+    shadowColor: '#ffffff',  // 星点与数字的阴影颜色
+    shadowDepth: 0,          // 阴影偏移 0-16 px
+    shadowBlur: 12           // 阴影范围 0-40 px
+  },
   maxWorkGroups: 3,          // 进程列表里保留的工作组数量 3 ~ 7
   selfWhitelist: false,      // 专注期间切到本软件时暂停计时、不算偏离
   processHistory: {          // 进程选择历史：双进程工作组 + 常用单进程
@@ -174,9 +187,10 @@ export function mergeSettings(saved) {
     : (Number.isFinite(rawDuration) ? durationToLevel(rawDuration) : base.sky.flowSpeed);
   delete out.sky.baseDuration;
   out.background = { ...base.background, ...(saved.background || {}) };
+  out.mini = mergeMini(saved.mini);
   out.psychology = mergePsychology(saved.psychology, out.dayStartMinutes);
   out.specialWhitelist = mergeSpecialWhitelist(saved.specialWhitelist);
-  out.settingsTab = ['rules', 'backup', 'psychology'].includes(saved.settingsTab) ? saved.settingsTab : 'appearance';
+  out.settingsTab = ['rules', 'exchange', 'backup', 'psychology'].includes(saved.settingsTab) ? saved.settingsTab : 'appearance';
   const rawMax = Number(saved.maxWorkGroups);
   out.maxWorkGroups = Number.isFinite(rawMax) ? Math.max(3, Math.min(7, Math.round(rawMax))) : base.maxWorkGroups;
   out.selfWhitelist = saved.selfWhitelist === true;
@@ -226,6 +240,33 @@ function mergeSpecialWhitelist(raw) {
     normalSpeed: speed(src.normalSpeed, base.normalSpeed),
     strictSpeed: speed(src.strictSpeed, base.strictSpeed),
     items
+  };
+}
+
+// 迷你模式：面板底色、尺寸与阴影，范围校验后回写
+function mergeMini(raw) {
+  const base = DEFAULT_SETTINGS.mini;
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const num = (value, min, max, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  };
+  const color = typeof src.shadowColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(src.shadowColor)
+    ? src.shadowColor
+    : base.shadowColor;
+  return {
+    bgHue: Math.round(num(src.bgHue, 0, 360, base.bgHue)),
+    bgSaturation: Math.round(num(src.bgSaturation, 0, 100, base.bgSaturation)),
+    bgValue: Math.round(num(src.bgValue, 0, 100, base.bgValue)),
+    bgAlpha: Math.round(num(src.bgAlpha, 0, 100, base.bgAlpha)),
+    width: Math.round(num(src.width, 140, 420, base.width)),
+    height: Math.round(num(src.height, 140, 400, base.height)),
+    starFollowTier: src.starFollowTier !== false,
+    numberFollowTier: src.numberFollowTier === true,
+    shadowColor: color,
+    shadowDepth: Math.round(num(src.shadowDepth, 0, 16, base.shadowDepth)),
+    shadowBlur: Math.round(num(src.shadowBlur, 0, 40, base.shadowBlur))
   };
 }
 

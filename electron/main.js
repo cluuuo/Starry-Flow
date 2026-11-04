@@ -635,14 +635,18 @@ function dateStamp() {
 const MAIN_MIN = { width: 1100, height: 760 };
 const COMPACT_MIN = { width: 360, height: 560 };
 const COMPACT_DEFAULT = { width: 424, height: 704 };
-const MINI_SIZE = { width: 220, height: 200 };
+const MINI_SIZE = { width: 196, height: 190 };
 
 let appState = null;
 let currentMode = 'classic';
 let mainMode = 'classic';
 let miniWindow = null;
-let miniDragState = null;
+let miniMoveTimer = null;
 let windowStateTimer = null;
+// 预览：主窗口保持显示，单独弹出迷你窗口供设置页实时查看改动
+let miniPreview = false;
+// 预览时的临时位置，关闭预览后还原，避免污染正式迷你模式的位置记忆
+let miniPreviewPrevPos = null;
 
 function isVisibleOnAnyDisplay(x, y, width, height) {
   return screen.getAllDisplays().some((d) => {
@@ -736,17 +740,79 @@ function compactBounds() {
   return { ...centered(area, width, height), width, height };
 }
 
-function miniBounds() {
+function miniSizeFromSettings() {
+  const saved = readJsonSafe(SETTINGS_FILE) || {};
+  const cfg = saved.mini && typeof saved.mini === 'object' ? saved.mini : {};
+  const clamp = (v, min, max, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fallback;
+  };
+  return {
+    width: clamp(cfg.width, 140, 420, MINI_SIZE.width),
+    height: clamp(cfg.height, 140, 400, MINI_SIZE.height)
+  };
+}
+
+function miniBounds(size = MINI_SIZE) {
   const area = screen.getPrimaryDisplay().workArea;
   const saved = appState.mini;
-  if (saved && isVisibleOnAnyDisplay(saved.x, saved.y, MINI_SIZE.width, MINI_SIZE.height)) {
-    return { x: saved.x, y: saved.y, ...MINI_SIZE };
+  if (saved && isVisibleOnAnyDisplay(saved.x, saved.y, size.width, size.height)) {
+    return { x: saved.x, y: saved.y, ...size };
   }
   // 默认贴在屏幕最上方居中
   return {
-    x: Math.round(area.x + (area.width - MINI_SIZE.width) / 2),
+    x: Math.round(area.x + (area.width - size.width) / 2),
     y: area.y + 16,
-    ...MINI_SIZE
+    ...size
+  };
+}
+
+// 预览窗口要完整落在屏幕里，也不能压住设置页：
+// 依次尝试主窗口右侧、主窗口下方、屏幕右上角，都放不下就用最后一个（贴边）
+function placeMiniForPreview() {
+  if (!miniWindow || miniWindow.isDestroyed()) return;
+  const b = miniWindow.getBounds();
+  const fullyVisible = screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    return b.x >= a.x && b.y >= a.y
+      && b.x + b.width <= a.x + a.width && b.y + b.height <= a.y + a.height;
+  });
+  const mb = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null;
+  const intersects = mb ? !(
+    b.x + b.width <= mb.x || b.x >= mb.x + mb.width
+    || b.y + b.height <= mb.y || b.y >= mb.y + mb.height
+  ) : false;
+  if (fullyVisible && !intersects) return;
+
+  const area = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea;
+  const clampY = (y) => Math.max(area.y + 8, Math.min(y, area.y + area.height - b.height - 8));
+  const candidates = [];
+  if (mb) {
+    candidates.push({ x: mb.x + mb.width + 16, y: clampY(mb.y + 16) });
+    candidates.push({ x: mb.x + 16, y: clampY(mb.y + mb.height + 16) });
+  }
+  candidates.push({ x: area.x + area.width - b.width - 24, y: area.y + 24 });
+  const target = candidates.find(
+    (p) => p.x >= area.x + 8 && p.x + b.width <= area.x + area.width - 8
+  ) || candidates[candidates.length - 1];
+  miniWindow.setBounds({
+    x: Math.round(target.x),
+    y: Math.round(target.y),
+    width: b.width,
+    height: b.height
+  });
+}
+
+// 尺寸变化后把窗口收进所在屏幕的工作区，避免面板被挤出屏幕
+function boundsWithinDisplay(bounds) {
+  const area = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
+  const width = Math.min(bounds.width, area.width);
+  const height = Math.min(bounds.height, area.height);
+  return {
+    x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),
+    y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)),
+    width,
+    height
   };
 }
 
@@ -801,8 +867,9 @@ function applyMainMode(mode) {
 }
 
 function createMiniWindow() {
+  const size = miniSizeFromSettings();
   const win = new BrowserWindow({
-    ...miniBounds(),
+    ...miniBounds(size),
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -812,6 +879,8 @@ function createMiniWindow() {
     fullscreenable: false,
     skipTaskbar: true,
     hasShadow: false,
+    // 系统圆角会与自绘圆角叠加出黑角，透明窗口必须关掉
+    roundedCorners: false,
     alwaysOnTop: true,
     show: false,
     title: 'Starry Flow 星流',
@@ -824,8 +893,25 @@ function createMiniWindow() {
   });
   miniWindow = win;
   win.setAlwaysOnTop(true, 'floating');
+  // 原生拖动没有结束事件，用 move 防抖记住位置；预览中的临时挪动不写入记忆
+  win.on('move', () => {
+    clearTimeout(miniMoveTimer);
+    miniMoveTimer = setTimeout(() => {
+      if (!miniWindow || miniWindow.isDestroyed() || miniPreview) return;
+      const [x, y] = miniWindow.getPosition();
+      appState.mini = { x, y };
+      persistAppState();
+    }, 400);
+  });
   win.once('ready-to-show', () => {
-    if (!win.isDestroyed() && currentMode === 'mini') win.showInactive();
+    if (win.isDestroyed()) return;
+    win.webContents.send('mini:preview', miniPreview);
+    if (currentMode === 'mini' || miniPreview) {
+      // 预览时主窗口还开着，先把面板挪到主窗口之外并抬到最前，避免被主窗口盖住
+      if (miniPreview) placeMiniForPreview();
+      win.showInactive();
+      if (miniPreview) win.moveTop();
+    }
   });
   win.on('closed', () => {
     miniWindow = null;
@@ -858,11 +944,44 @@ function showMiniWindow() {
   miniWindow.showInactive();
 }
 
+// 设置页的预览开关：只弹出迷你窗口，不改变主窗口当前的显示模式
+function setMiniPreview(on) {
+  const next = on === true;
+  if (next === miniPreview) return { ok: true, preview: miniPreview };
+  miniPreview = next;
+  if (next) {
+    // 先记下正式迷你模式的位置，预览结束再还回去
+    const [x, y] = miniWindow && !miniWindow.isDestroyed()
+      ? miniWindow.getPosition()
+      : [appState.mini ? appState.mini.x : null, appState.mini ? appState.mini.y : null];
+    miniPreviewPrevPos = Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    if (!miniWindow || miniWindow.isDestroyed()) {
+      createMiniWindow(); // ready-to-show 会按 miniPreview 决定是否显示
+    } else {
+      miniWindow.webContents.send('mini:preview', true);
+      placeMiniForPreview();
+      miniWindow.showInactive();
+      miniWindow.moveTop();
+    }
+  } else if (miniWindow && !miniWindow.isDestroyed()) {
+    miniWindow.webContents.send('mini:preview', false);
+    miniWindow.hide();
+    if (miniPreviewPrevPos) {
+      const b = miniWindow.getBounds();
+      miniWindow.setBounds({ ...miniPreviewPrevPos, width: b.width, height: b.height });
+    }
+    miniPreviewPrevPos = null;
+  }
+  return { ok: true, preview: miniPreview };
+}
+
 function setWindowMode(mode) {
   if (!appState) return currentMode;
   if (!['classic', 'compact', 'mini'].includes(mode) || mode === currentMode) return currentMode;
 
   if (mode === 'mini') {
+    // 正式进入迷你模式时，预览状态作废，避免两套逻辑互相干扰
+    miniPreview = false;
     saveMainState();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
     showMiniWindow();
@@ -993,32 +1112,42 @@ function bootstrap() {
   // 版本号直接取打包/开发时 package.json 的 version，升版后界面自动同步
   ipcMain.handle('app:version', () => app.getVersion());
 
-  // 迷你窗口：点击切回极简，或拖动整窗移动
-  ipcMain.on('mini:activate', () => setWindowMode('compact'));
-  ipcMain.on('mini:drag-start', () => {
-    if (!miniWindow || miniWindow.isDestroyed()) return;
-    const [wx, wy] = miniWindow.getPosition();
-    const pt = screen.getCursorScreenPoint();
-    miniDragState = { wx, wy, cx: pt.x, cy: pt.y };
+  // 迷你窗口：点击按钮切回极简；位置由原生拖动后随 move 事件记忆
+  ipcMain.on('mini:activate', () => {
+    if (miniPreview) return; // 预览窗口里的按钮不触发模式切换
+    setWindowMode('compact');
   });
-  ipcMain.on('mini:drag-move', () => {
-    if (!miniWindow || miniWindow.isDestroyed() || !miniDragState) return;
-    const pt = screen.getCursorScreenPoint();
-    miniWindow.setPosition(
-      Math.round(miniDragState.wx + pt.x - miniDragState.cx),
-      Math.round(miniDragState.wy + pt.y - miniDragState.cy)
-    );
-  });
-  ipcMain.on('mini:drag-end', () => {
-    miniDragState = null;
-    if (!miniWindow || miniWindow.isDestroyed()) return;
+  // 设置页的预览开关：显示 / 隐藏迷你窗口，主窗口保持原样
+  ipcMain.handle('mini:preview', (_event, on) => setMiniPreview(on));
+  ipcMain.handle('mini:preview-state', () => miniPreview);
+  // 面板尺寸由外观设置控制，窗口随之伸缩并收进当前屏幕工作区
+  ipcMain.handle('mini:set-size', (_event, size) => {
+    if (!miniWindow || miniWindow.isDestroyed()) return { ok: false };
+    const clamp = (v, min, max, fallback) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fallback;
+    };
+    const width = clamp(size && size.width, 140, 420, MINI_SIZE.width);
+    const height = clamp(size && size.height, 140, 400, MINI_SIZE.height);
     const [x, y] = miniWindow.getPosition();
-    appState.mini = { x, y };
-    persistAppState();
+    miniWindow.setBounds(boundsWithinDisplay({ x, y, width, height }));
+    return { ok: true, width, height };
   });
 
   ipcMain.handle('settings:set', (_event, settings) => {
-    return writeJsonSafe(SETTINGS_FILE, settings);
+    const ok = writeJsonSafe(SETTINGS_FILE, settings);
+    // 迷你窗口开着（含预览）时立刻同步尺寸，并通知渲染层重读设置，滑块拖动即可见
+    const mini = settings && settings.mini;
+    if (miniWindow && !miniWindow.isDestroyed()) {
+      const w = Math.max(140, Math.min(420, Math.round(Number(mini && mini.width) || MINI_SIZE.width)));
+      const h = Math.max(140, Math.min(400, Math.round(Number(mini && mini.height) || MINI_SIZE.height)));
+      const b = miniWindow.getBounds();
+      if (b.width !== w || b.height !== h) {
+        miniWindow.setBounds(boundsWithinDisplay({ x: b.x, y: b.y, width: w, height: h }));
+      }
+      miniWindow.webContents.send('settings:changed');
+    }
+    return ok;
   });
 
   ipcMain.handle('monitor:read', () => {

@@ -608,7 +608,7 @@ def evaluate_pacts(data, today_key, psychology):
             data["counters"]["pact_success"] = int(num(data["counters"].get("pact_success"), 0)) + 1
             add_notice(
                 data, True,
-                "对赌达成：%s 目标 %d 积分，额外奖励 %d 积分。" % (date, goal, bonus),
+                "星辉契约达成：%s 目标 %d 积分，额外奖励 %d 积分。" % (date, goal, bonus),
                 celebrate=True
             )
         elif date < today_key and total < goal * ratio / 100.0:
@@ -616,7 +616,7 @@ def evaluate_pacts(data, today_key, psychology):
             item["status"] = "failed"
             add_notice(
                 data, False,
-                "对赌未达成：%s 累计 %d，未到目标的 %d%%，欠下 %d 赤字积分。" % (date, total, ratio, goal)
+                "星辉契约未达成：%s 累计 %d，未到目标的 %d%%，欠下 %d 赤字积分。" % (date, total, ratio, goal)
             )
         elif date < today_key:
             # 达到判定比例但没到目标：不奖励也不产生赤字
@@ -711,7 +711,7 @@ def handle_command(data, cmd, key):
         psych = data.get("psychology") or default_psychology()
         pact_cfg = psych.get("pact") or {}
         if not pact_cfg.get("enabled"):
-            add_notice(data, False, "请先在设置中开启对赌协议。")
+            add_notice(data, False, "请先在设置中开启星辉契约。")
             return
         date = str(payload.get("date") or "")
         goal = int(max(0, num(payload.get("goal"), 0)))
@@ -719,10 +719,20 @@ def handle_command(data, cmd, key):
             add_notice(data, False, "请选择有效的日期。")
             return
         if date < key:
-            add_notice(data, False, "对赌不能设在过去的日期。")
+            add_notice(data, False, "星辉契约不能设在过去的日期。")
             return
         if goal <= 0:
             add_notice(data, False, "计划积分需大于 0。")
+            return
+        # 已结束的对赌保留记录（星点圆点常驻），不允许再改
+        previous = data["pacts"].get(date)
+        if isinstance(previous, dict) and previous.get("status") != "pending":
+            add_notice(data, False, "当日星辉契约已结束，无法修改。")
+            return
+        # 对赌一旦立下不可删除、不可降低：已存在时只能把目标往上调
+        old_goal = int(max(0, num(previous.get("goal"), 0))) if isinstance(previous, dict) else 0
+        if isinstance(previous, dict) and goal <= old_goal:
+            add_notice(data, False, "星辉契约目标只能提高，当前目标 %d 积分。" % old_goal)
             return
         data["pacts"][date] = {
             "goal": goal,
@@ -730,22 +740,17 @@ def handle_command(data, cmd, key):
             "reward": int(num(pact_cfg.get("reward"), 100)),
             "status": "pending",
             "bonus": 0,
-            "created_at": datetime.datetime.now().isoformat(timespec="seconds")
+            "created_at": (previous or {}).get("created_at") or datetime.datetime.now().isoformat(timespec="seconds")
         }
-        add_notice(data, True, "已立下 %s 的对赌：目标 %d 积分。" % (date, goal))
+        if old_goal > 0:
+            add_notice(data, True, "已将 %s 的星辉契约目标从 %d 提高到 %d 积分。" % (date, old_goal, goal))
+        else:
+            add_notice(data, True, "已立下 %s 的星辉契约：目标 %d 积分。" % (date, goal))
         return
 
     if action == "cancel_pact":
-        date = str(payload.get("date") or "")
-        item = data["pacts"].get(date)
-        if not isinstance(item, dict) or item.get("status") != "pending":
-            add_notice(data, False, "没有可取消的对赌。")
-            return
-        if date < key:
-            add_notice(data, False, "过去日期的对赌无法取消。")
-            return
-        del data["pacts"][date]
-        add_notice(data, True, "已取消 %s 的对赌。" % date)
+        # 对赌一旦立下不可取消，保留指令仅为兼容旧客户端
+        add_notice(data, False, "星辉契约一旦立下不可取消。")
         return
 
     if action == "pay_deficit":

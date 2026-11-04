@@ -1,24 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   mergeSettings,
   DEFAULT_SETTINGS,
   logicalDateKey,
   tierIndex,
   tierHex,
-  tierGlow,
-  hexToRgb
+  hexToRgb,
+  hsvToHex
 } from '../lib/logic';
 
 // 与主界面星点共用的四芒星轮廓
 const STAR4_PATH =
   'M50 7 C54 30 65 41 93 50 C65 59 54 70 50 93 C46 70 35 59 7 50 C35 41 46 30 50 7 Z';
 
-// 只显示一颗星点与今日积分：拖动整窗移动，单击切回极简模式
+// 只显示一颗星点与今日积分：整个面板由系统原生拖动，右上角按钮切回极简模式
 export default function MiniApp() {
   const [focus, setFocus] = useState(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const dragRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
+  // 预览状态：预览时隐藏右上角的模式切换按钮，避免误把主窗口切走
+  const [preview, setPreview] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add('mini-doc');
@@ -37,9 +37,30 @@ export default function MiniApp() {
     };
     load();
     const timer = setInterval(load, 2000);
+    // 主窗口保存设置后立即重读，拖动滑块时预览能马上反映改动
+    const off = window.api.onSettingsChanged ? window.api.onSettingsChanged(load) : null;
     return () => {
       alive = false;
       clearInterval(timer);
+      if (off) off();
+    };
+  }, []);
+
+  // 预览由设置页的开关驱动，主进程推送状态
+  useEffect(() => {
+    if (!window.api) return undefined;
+    let alive = true;
+    if (window.api.getMiniPreview) {
+      window.api.getMiniPreview()
+        .then((v) => { if (alive) setPreview(v === true); })
+        .catch(() => { /* 忽略 */ });
+    }
+    const off = window.api.onMiniPreview
+      ? window.api.onMiniPreview((v) => setPreview(v === true))
+      : null;
+    return () => {
+      alive = false;
+      if (off) off();
     };
   }, []);
 
@@ -68,68 +89,61 @@ export default function MiniApp() {
   const level = tierIndex(points, settings.tiers);
   const tier = level >= 0 ? settings.tiers[level] : null;
   const lit = level >= 0;
-  // 星点与数字使用纯净的主题色 / 档位色，不用 brightness 压暗，避免颜色发灰发脏
-  const fillColor = lit ? tierHex(settings.starColor, level, tier) : settings.starColor;
+  const mini = settings.mini;
+  // 档位色：积分越高越亮；关闭跟随后统一用星点主色
+  const tierColor = lit ? tierHex(settings.starColor, level, tier) : settings.starColor;
+  const fillColor = mini.starFollowTier ? tierColor : settings.starColor;
   const rgb = hexToRgb(fillColor);
-  const glowSize = lit ? 6 + tierGlow(tier, level) * 10 : 6;
-  const glowAlpha = lit ? 0.5 : 0.32;
-  const glowStyle = {
-    filter: `drop-shadow(0 0 ${glowSize.toFixed(1)}px rgba(${rgb.r},${rgb.g},${rgb.b},${glowAlpha}))`
+  const pointsColor = mini.numberFollowTier ? tierColor : '#141a2c';
+
+  // 面板：HSV 底色 + 不透明度；尺寸同步给窗口，鼠标判定范围始终等于面板
+  const panelRgb = hexToRgb(hsvToHex(mini.bgHue, mini.bgSaturation, mini.bgValue));
+  const panelStyle = {
+    background: `rgba(${panelRgb.r},${panelRgb.g},${panelRgb.b},${(mini.bgAlpha / 100).toFixed(2)})`,
+    borderColor: `rgba(${panelRgb.r},${panelRgb.g},${panelRgb.b},${Math.min(1, mini.bgAlpha / 100 + 0.2).toFixed(2)})`
   };
-  const pointsShadow =
-    `0 1px 3px rgba(0,0,0,0.8), 0 0 10px rgba(0,0,0,0.5), ` +
-    `0 0 18px rgba(${rgb.r},${rgb.g},${rgb.b},0.45)`;
+
+  // 星点与数字共用一套阴影参数：颜色 / 深度（偏移）/ 范围（模糊）
+  const shadow = `${mini.shadowDepth}px ${mini.shadowDepth}px ${mini.shadowBlur}px ${mini.shadowColor}`;
+  const starShadowStyle = { filter: `drop-shadow(${shadow})` };
 
   const lost = !!focus?.focus_lost;
   const strictOn = !!focus?.settings?.strict?.enabled;
 
-  const handlePointerDown = (e) => {
-    if (e.button !== 0) return;
-    dragRef.current = { x: e.screenX, y: e.screenY, moved: false };
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (window.api) window.api.miniDragStart();
-  };
+  // 面板尺寸变化时通知主进程调整窗口大小
+  useEffect(() => {
+    if (!window.api || !window.api.setMiniSize) return;
+    window.api.setMiniSize({ width: mini.width, height: mini.height });
+  }, [mini.width, mini.height]);
 
-  const handlePointerMove = (e) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    if (!drag.moved && Math.hypot(e.screenX - drag.x, e.screenY - drag.y) > 4) {
-      drag.moved = true;
-      setDragging(true);
-    }
-    if (drag.moved && window.api) window.api.miniDragMove();
-  };
-
-  const handlePointerUp = () => {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    if (!drag) return;
-    if (window.api) window.api.miniDragEnd();
-    setDragging(false);
-    // 没有拖动位移视为单击 → 回到极简模式
-    if (!drag.moved && window.api) window.api.activateMini();
+  // 拖动交给窗口管理器的原生拖拽区（-webkit-app-region: drag）：
+  // 自己用 setPosition 跟随光标会形成“窗口追光标”的正反馈，按住不动也会漂移
+  const backToCompact = () => {
+    if (window.api) window.api.activateMini();
   };
 
   const ringColor = `rgba(${rgb.r},${rgb.g},${rgb.b},0.62)`;
 
   return (
-    <div
-      className={`mini-root${dragging ? ' dragging' : ''}`}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (window.api) window.api.activateMini();
-      }}
-    >
+    <div className="mini-root" style={panelStyle}>
+      {!preview && (
+        <button
+          className="mini-switch"
+          onClick={backToCompact}
+          title="切回极简模式"
+          aria-label="切回极简模式"
+        >
+          <svg viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M3.5 8.5l5-5M5 3.5h3.5V7" />
+          </svg>
+        </button>
+      )}
       <div className="mini-star-area">
         {strictOn && (
           <span className="mini-ring" style={{ '--ring-color': ringColor }} aria-hidden="true" />
         )}
         <div className="mini-star-float">
-          <svg viewBox="0 0 100 100" style={{ color: fillColor, ...glowStyle }} aria-hidden="true">
+          <svg viewBox="0 0 100 100" style={{ color: fillColor, ...starShadowStyle }} aria-hidden="true">
             <path
               d={STAR4_PATH}
               fill="currentColor"
@@ -142,7 +156,7 @@ export default function MiniApp() {
       </div>
       <div
         className={`mini-points${lost ? ' lost' : ''}`}
-        style={lost ? undefined : { color: fillColor, textShadow: pointsShadow }}
+        style={lost ? undefined : { color: pointsColor, textShadow: shadow }}
       >
         {points.toLocaleString()}
       </div>

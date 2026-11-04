@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { minutesToTimeStr, timeStrToMinutes, DEFAULT_SETTINGS, tierBrightness, tierGlow, tierHex, hsvToHex } from '../lib/logic';
+import { minutesToTimeStr, timeStrToMinutes, DEFAULT_SETTINGS, tierBrightness, tierGlow, tierHex, hsvToHex, hexToRgb } from '../lib/logic';
 import WhitelistPicker from './WhitelistPicker';
 import WebdavPanel from './WebdavPanel';
 
@@ -38,7 +38,7 @@ export default function SettingsWindow({
 }) {
   const [tab, setTab] = useState(() => {
     const saved = settings.settingsTab;
-    return ['rules', 'backup', 'psychology'].includes(saved) ? saved : 'appearance';
+    return ['rules', 'exchange', 'backup', 'psychology'].includes(saved) ? saved : 'appearance';
   });
   const [exchangeAmount, setExchangeAmount] = useState(1);
   const [spendAmount, setSpendAmount] = useState(1);
@@ -51,6 +51,7 @@ export default function SettingsWindow({
   const [debugUnlocked, setDebugUnlocked] = useState(false);
   const [pointsDelta, setPointsDelta] = useState('');
   const [allowanceDelta, setAllowanceDelta] = useState('');
+  const [previewOn, setPreviewOn] = useState(false);
 
   // 窗口高度跟随当前页内容：切换标签时用 CSS 过渡平滑改变，避免突然跳尺寸
   const winRef = useRef(null);
@@ -107,6 +108,16 @@ export default function SettingsWindow({
     if (open && tab === 'backup' && onRefreshStorage) onRefreshStorage();
   }, [open, tab, onRefreshStorage]);
 
+  // 预览只在「外观设置」里有效：关掉设置或切到别的标签页就收起迷你窗口
+  useEffect(() => {
+    if (!open || tab !== 'appearance') {
+      if (previewOn) {
+        setPreviewOn(false);
+        if (window.api && window.api.setMiniPreview) window.api.setMiniPreview(false);
+      }
+    }
+  }, [open, tab, previewOn]);
+
   if (!open) return null;
 
   const update = (patch) => onChange({ ...settings, ...patch });
@@ -121,6 +132,18 @@ export default function SettingsWindow({
   const resetPact = () => updatePsych({
     pact: JSON.parse(JSON.stringify(DEFAULT_SETTINGS.psychology.pact))
   });
+
+  const miniCfg = settings.mini || DEFAULT_SETTINGS.mini;
+  const updateMini = (patch) => update({ mini: { ...miniCfg, ...patch } });
+
+  // 预览开关：弹出真实的迷你窗口，主窗口保持显示，改动即时可见
+  const togglePreview = async () => {
+    const next = !previewOn;
+    setPreviewOn(next);
+    if (window.api && window.api.setMiniPreview) await window.api.setMiniPreview(next);
+  };
+  const miniBg = hexToRgb(hsvToHex(miniCfg.bgHue, miniCfg.bgSaturation, miniCfg.bgValue));
+  const miniBgRgba = `rgba(${miniBg.r},${miniBg.g},${miniBg.b},${(miniCfg.bgAlpha / 100).toFixed(2)})`;
 
   const special = settings.specialWhitelist || DEFAULT_SETTINGS.specialWhitelist;
   const updateSpecial = (patch) => update({ specialWhitelist: { ...special, ...patch } });
@@ -179,6 +202,9 @@ export default function SettingsWindow({
   const allowanceName = fset.allowance_name;
   const allowance = focus?.allowance || 0;
   const cumulative = focus?.cumulative_points || 0;
+  // 当前可用积分按兑换比例最多能换多少额度
+  const exchangeRate = Math.max(1, Math.round(Number(fset.exchange_rate) || 1));
+  const maxExchange = Math.floor(cumulative / exchangeRate);
 
   const updateFocus = (patch) => {
     if (!onFocusCommand) return;
@@ -283,10 +309,16 @@ export default function SettingsWindow({
             规则设置
           </button>
           <button
+            className={`settings-tab ${tab === 'exchange' ? 'on' : ''}`}
+            onClick={() => switchTab('exchange')}
+          >
+            积分兑换
+          </button>
+          <button
             className={`settings-tab ${tab === 'psychology' ? 'on' : ''}`}
             onClick={() => switchTab('psychology')}
           >
-            心理学模型
+            契约激活
           </button>
           <button
             className={`settings-tab ${tab === 'backup' ? 'on' : ''}`}
@@ -559,6 +591,192 @@ export default function SettingsWindow({
 
               <div className="settings-section settings-wide">
                 <div className="settings-title-row">
+                  <div className="settings-title">迷你模式</div>
+                  <div className="mini-preview-actions">
+                    <div className="mini-preview-toggle">
+                      <span>预览</span>
+                      <button
+                        className={`switch ${previewOn ? 'on' : ''}`}
+                        onClick={togglePreview}
+                        title="弹出迷你窗口，实时查看改动"
+                      >
+                        <span className="switch-knob" />
+                      </button>
+                    </div>
+                    <button className="settings-reset-mini" onClick={() => resetKeys(['mini'])}>恢复默认</button>
+                  </div>
+                </div>
+                <p className="settings-desc">
+                  迷你模式是透明浮窗，这里的设置只影响它。窗口大小会跟随下面的宽高，鼠标判定范围与面板一致。
+                  打开预览会单独弹出迷你窗口，调哪里就能看到哪里；关闭设置页或切到别的标签会自动收起。
+                </p>
+
+                <div className="mini-settings">
+                  <div className="mini-settings-col">
+                    <div className="settings-caption">面板背景</div>
+
+                    <div className="field-row">
+                      <label>当前颜色</label>
+                      <span
+                        className="bg-preview"
+                        style={{ backgroundColor: miniBgRgba }}
+                      />
+                      <span className="field-hint">
+                        色相 {miniCfg.bgHue}° · 饱和 {miniCfg.bgSaturation}% · 明度 {miniCfg.bgValue}%
+                      </span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>色相</label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={360}
+                        step={1}
+                        value={miniCfg.bgHue}
+                        onChange={(e) => updateMini({ bgHue: Number(e.target.value) })}
+                      />
+                      <span className="field-value">{miniCfg.bgHue}°</span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>饱和度</label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={miniCfg.bgSaturation}
+                        onChange={(e) => updateMini({ bgSaturation: Number(e.target.value) })}
+                      />
+                      <span className="field-value">{miniCfg.bgSaturation}%</span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>明度</label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={miniCfg.bgValue}
+                        onChange={(e) => updateMini({ bgValue: Number(e.target.value) })}
+                      />
+                      <span className="field-value">{miniCfg.bgValue}%</span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>不透明度</label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={miniCfg.bgAlpha}
+                        onChange={(e) => updateMini({ bgAlpha: Number(e.target.value) })}
+                      />
+                      <span className="field-value">{miniCfg.bgAlpha}%</span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>宽度</label>
+                      <input
+                        type="number"
+                        className="focus-number-input"
+                        min={140}
+                        max={420}
+                        step={4}
+                        value={miniCfg.width}
+                        onChange={(e) => updateMini({
+                          width: Math.max(140, Math.min(420, Math.round(Number(e.target.value) || 140)))
+                        })}
+                      />
+                      <span className="field-hint">px</span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>高度</label>
+                      <input
+                        type="number"
+                        className="focus-number-input"
+                        min={140}
+                        max={400}
+                        step={4}
+                        value={miniCfg.height}
+                        onChange={(e) => updateMini({
+                          height: Math.max(140, Math.min(400, Math.round(Number(e.target.value) || 140)))
+                        })}
+                      />
+                      <span className="field-hint">px</span>
+                    </div>
+                  </div>
+
+                  <div className="mini-settings-col">
+                    <div className="settings-caption">星点与积分</div>
+
+                    <div className="field-row">
+                      <label>星点跟随档位颜色</label>
+                      <button
+                        className={`switch ${miniCfg.starFollowTier ? 'on' : ''}`}
+                        onClick={() => updateMini({ starFollowTier: !miniCfg.starFollowTier })}
+                      >
+                        <span className="switch-knob" />
+                      </button>
+                    </div>
+
+                    <div className="field-row">
+                      <label>积分数字跟随档位颜色</label>
+                      <button
+                        className={`switch ${miniCfg.numberFollowTier ? 'on' : ''}`}
+                        onClick={() => updateMini({ numberFollowTier: !miniCfg.numberFollowTier })}
+                      >
+                        <span className="switch-knob" />
+                      </button>
+                    </div>
+
+                    <div className="settings-caption">阴影</div>
+
+                    <div className="field-row">
+                      <label>阴影颜色</label>
+                      <input
+                        type="color"
+                        value={miniCfg.shadowColor}
+                        onChange={(e) => updateMini({ shadowColor: e.target.value })}
+                      />
+                      <span className="field-hint">同时作用于星点与数字</span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>阴影深度</label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={16}
+                        step={1}
+                        value={miniCfg.shadowDepth}
+                        onChange={(e) => updateMini({ shadowDepth: Number(e.target.value) })}
+                      />
+                      <span className="field-value">{miniCfg.shadowDepth}px</span>
+                    </div>
+
+                    <div className="field-row">
+                      <label>阴影范围</label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={40}
+                        step={1}
+                        value={miniCfg.shadowBlur}
+                        onChange={(e) => updateMini({ shadowBlur: Number(e.target.value) })}
+                      />
+                      <span className="field-value">{miniCfg.shadowBlur}px</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-section settings-wide">
+                <div className="settings-title-row">
                   <div className="settings-title">积分档位</div>
                   <button className="settings-reset-mini" onClick={() => resetKeys(['tiers'])}>恢复默认</button>
                 </div>
@@ -786,77 +1004,6 @@ export default function SettingsWindow({
                 </div>
               </div>
 
-              <div className="settings-section">
-                <div className="settings-title-row">
-                  <div className="settings-title">兑换与额度</div>
-                  <button className="settings-reset-mini" onClick={resetExchange}>恢复默认</button>
-                </div>
-                <p className="settings-desc">
-                  已结算积分可按比例兑换成{allowanceName}，用于给自己发奖励；花费只减少额度，不动积分。
-                </p>
-
-                <div className="field-row">
-                  <label>{allowanceName}名称</label>
-                  <input
-                    type="text"
-                    className="focus-text-input"
-                    value={allowanceName}
-                    onChange={(e) => updateFocus({ allowance_name: e.target.value })}
-                  />
-                </div>
-
-                <div className="field-row">
-                  <label>兑换比例</label>
-                  <input
-                    type="number"
-                    className="focus-number-input"
-                    min={1}
-                    step={100}
-                    value={fset.exchange_rate}
-                    onChange={(e) => updateFocus({ exchange_rate: Math.max(1, Number(e.target.value) || 0) })}
-                  />
-                  <span className="field-hint">积分 / 1 {allowanceName}</span>
-                </div>
-
-                <div className="field-row">
-                  <label>当前额度</label>
-                  <span className="focus-value-text">{allowance} {allowanceName}</span>
-                </div>
-
-                <div className="field-row">
-                  <label>兑换</label>
-                  <input
-                    type="number"
-                    className="focus-number-input"
-                    min={1}
-                    value={exchangeAmount}
-                    onChange={(e) => setExchangeAmount(Math.max(1, Number(e.target.value) || 1))}
-                  />
-                  <span className="focus-seg-text">{allowanceName}</span>
-                  <button
-                    className="focus-mini-btn"
-                    onClick={() => onFocusCommand && onFocusCommand('exchange', { amount: exchangeAmount })}
-                  >
-                    兑换
-                  </button>
-                </div>
-
-                <div className="field-row">
-                  <label>花费</label>
-                  <input
-                    type="number"
-                    className="focus-number-input"
-                    min={1}
-                    value={spendAmount}
-                    onChange={(e) => setSpendAmount(Math.max(1, Number(e.target.value) || 1))}
-                  />
-                  <span className="focus-seg-text">{allowanceName}</span>
-                  <button className="focus-mini-btn" onClick={() => onFocusCommand && onFocusCommand('spend', { amount: spendAmount })}>
-                    花费
-                  </button>
-                </div>
-              </div>
-
               <div className="settings-section settings-wide">
                 <div className="settings-title-row">
                   <div className="settings-title">专注规则</div>
@@ -1033,22 +1180,114 @@ export default function SettingsWindow({
             </div>
           )}
 
+          {tab === 'exchange' && (
+            <div className="settings-grid">
+              <div className="settings-section settings-wide">
+                <div className="settings-title-row">
+                  <div className="settings-title">兑换与额度</div>
+                  <button className="settings-reset-mini" onClick={resetExchange}>恢复默认</button>
+                </div>
+                <p className="settings-desc">
+                  已结算积分可按比例兑换成{allowanceName}，用于给自己发奖励；花费只减少额度，不动积分。
+                  未结算的本轮积分需要先「每日结算」才会进入可兑换的积分池。
+                </p>
+
+                <div className="exchange-stats">
+                  <div className="exchange-stat">
+                    <span className="exchange-stat-label">当前可用积分</span>
+                    <span className="exchange-stat-value">{cumulative.toLocaleString()}</span>
+                    <span className="exchange-stat-hint">已结算、可用于兑换的积分</span>
+                  </div>
+                  <div className="exchange-stat">
+                    <span className="exchange-stat-label">当前可兑换{allowanceName}</span>
+                    <span className="exchange-stat-value">{maxExchange.toLocaleString()}</span>
+                    <span className="exchange-stat-hint">
+                      按 {exchangeRate.toLocaleString()} 积分 / 1 {allowanceName}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="field-row">
+                  <label>{allowanceName}名称</label>
+                  <input
+                    type="text"
+                    className="focus-text-input"
+                    value={allowanceName}
+                    onChange={(e) => updateFocus({ allowance_name: e.target.value })}
+                  />
+                </div>
+
+                <div className="field-row">
+                  <label>兑换比例</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={1}
+                    step={100}
+                    value={fset.exchange_rate}
+                    onChange={(e) => updateFocus({ exchange_rate: Math.max(1, Number(e.target.value) || 0) })}
+                  />
+                  <span className="field-hint">积分 / 1 {allowanceName}</span>
+                </div>
+
+                <div className="field-row">
+                  <label>当前{allowanceName}</label>
+                  <span className="focus-value-text">{allowance.toLocaleString()} {allowanceName}</span>
+                </div>
+
+                <div className="field-row">
+                  <label>兑换</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={1}
+                    max={Math.max(1, maxExchange)}
+                    value={exchangeAmount}
+                    onChange={(e) => setExchangeAmount(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                  <span className="focus-seg-text">{allowanceName}</span>
+                  <button
+                    className="focus-mini-btn"
+                    onClick={() => onFocusCommand && onFocusCommand('exchange', { amount: exchangeAmount })}
+                  >
+                    兑换
+                  </button>
+                </div>
+
+                <div className="field-row">
+                  <label>花费</label>
+                  <input
+                    type="number"
+                    className="focus-number-input"
+                    min={1}
+                    value={spendAmount}
+                    onChange={(e) => setSpendAmount(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                  <span className="focus-seg-text">{allowanceName}</span>
+                  <button className="focus-mini-btn" onClick={() => onFocusCommand && onFocusCommand('spend', { amount: spendAmount })}>
+                    花费
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {tab === 'psychology' && (
             <div className="settings-grid">
               <div className="settings-section">
                 <div className="settings-title-row">
-                  <div className="settings-title">德西效应 · 健康就寝</div>
+                  <div className="settings-title">深空契约</div>
                   <button className="settings-reset-mini" onClick={resetSleep}>恢复默认</button>
                 </div>
                 <p className="settings-desc">
                   在设定的时间段内，专注积分速度降为下面设定的值，提醒你及时休息，不用熬低效率的夜。
                   起止时间各自可选「当日 / 次日」，因此可以跨日，例如「当日 23:00 – 次日 07:00」。
-                  在该时段内结算当日积分，还会获得一枚「乖乖睡觉」纪念章。
+                  在该时段内结算当日积分，还会获得一枚「深空契约履行者」纪念章。
                 </p>
 
                 <div className="field-row">
                   <span className="field-label-group">
-                    <label>健康就寝模式</label>
+                    <label>深空契约</label>
                     {sleepCfg.enabled && <span className="field-active">已激活</span>}
                   </span>
                   <button
@@ -1056,7 +1295,7 @@ export default function SettingsWindow({
                     onClick={() => updatePsych({ healthySleep: { ...sleepCfg, enabled: !sleepCfg.enabled } })}
                     role="switch"
                     aria-checked={!!sleepCfg.enabled}
-                    aria-label="健康就寝模式"
+                    aria-label="深空契约"
                   >
                     <span className="switch-knob" />
                   </button>
@@ -1072,7 +1311,7 @@ export default function SettingsWindow({
                       onChange={(e) => updatePsych({
                         healthySleep: { ...sleepCfg, startDay: Number(e.target.value) }
                       })}
-                      aria-label="就寝开始日期"
+                      aria-label="契约开始日期"
                     >
                       <option value={0}>当日</option>
                       <option value={1}>次日</option>
@@ -1087,7 +1326,7 @@ export default function SettingsWindow({
                           updatePsych({ healthySleep: { ...sleepCfg, startMinutes: minutes } });
                         }
                       }}
-                      aria-label="就寝开始时间"
+                      aria-label="契约开始时间"
                     />
                   </div>
                 </div>
@@ -1102,7 +1341,7 @@ export default function SettingsWindow({
                       onChange={(e) => updatePsych({
                         healthySleep: { ...sleepCfg, endDay: Number(e.target.value) }
                       })}
-                      aria-label="就寝结束日期"
+                      aria-label="契约结束日期"
                     >
                       <option value={0}>当日</option>
                       <option value={1}>次日</option>
@@ -1117,7 +1356,7 @@ export default function SettingsWindow({
                           updatePsych({ healthySleep: { ...sleepCfg, endMinutes: minutes } });
                         }
                       }}
-                      aria-label="就寝结束时间"
+                      aria-label="契约结束时间"
                     />
                   </div>
                 </div>
@@ -1157,7 +1396,7 @@ export default function SettingsWindow({
 
               <div className="settings-section">
                 <div className="settings-title-row">
-                  <div className="settings-title">损失厌恶效应 · 对赌协议</div>
+                  <div className="settings-title">星辉契约</div>
                   <button className="settings-reset-mini" onClick={resetPact}>恢复默认</button>
                 </div>
                 <p className="settings-desc">
@@ -1167,7 +1406,7 @@ export default function SettingsWindow({
 
                 <div className="field-row">
                   <span className="field-label-group">
-                    <label>对赌协议</label>
+                    <label>星辉契约</label>
                     {pactCfg.enabled && <span className="field-active">已激活</span>}
                   </span>
                   <button
@@ -1175,7 +1414,7 @@ export default function SettingsWindow({
                     onClick={() => updatePsych({ pact: { ...pactCfg, enabled: !pactCfg.enabled } })}
                     role="switch"
                     aria-checked={!!pactCfg.enabled}
-                    aria-label="对赌协议"
+                    aria-label="星辉契约"
                   >
                     <span className="switch-knob" />
                   </button>
@@ -1309,7 +1548,7 @@ export default function SettingsWindow({
               <div className="settings-section settings-wide">
                 <div className="settings-title">备份与恢复</div>
                 <p className="settings-desc">
-                  备份包含积分与专注数据、对赌与赤字、成就、全部设置，以及印痕文字和图片，可在新设备上完整还原。导入会整体替换当前数据。
+                  备份包含积分与专注数据、星辉契约与赤字、成就、全部设置，以及印痕文字和图片，可在新设备上完整还原。导入会整体替换当前数据。
                 </p>
                 <div className="backup-buttons">
                   <button className="settings-action" disabled={backupBusy} onClick={handleExport}>

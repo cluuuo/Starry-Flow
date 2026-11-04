@@ -42,9 +42,9 @@ export const ACHIEVEMENTS = [
   },
   {
     id: 'sleep-early',
-    name: '乖乖睡觉',
+    name: '深空契约履行者',
     art: 'moon',
-    desc: '在健康就寝时间之后完成当日结算',
+    desc: '在深空契约时间之后完成当日结算',
     metric: (ctx) => ctx.sleepSettles
   },
   {
@@ -56,9 +56,9 @@ export const ACHIEVEMENTS = [
   },
   {
     id: 'pact-won',
-    name: '对赌成功',
+    name: '星辉契约履行者',
     art: 'pact',
-    desc: '达成一次对赌协议目标',
+    desc: '达成一次星辉契约目标',
     metric: (ctx) => ctx.pactSuccess
   }
 ];

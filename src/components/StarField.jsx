@@ -291,7 +291,10 @@ export default function StarField({
               const level = tierIndex(cell.points, tiers);
               const lit = level >= 0;
               const hasMark = Boolean(marks && marks[cell.key]);
-              const hasPact = Boolean(pacts && pacts[cell.key] && pacts[cell.key].status === 'pending');
+              const hasPact = Boolean(pacts && pacts[cell.key]);
+              const pactStatus = hasPact ? pacts[cell.key].status : '';
+              const pactGoal = hasPact ? Math.max(0, Math.round(Number(pacts[cell.key].goal) || 0)) : 0;
+              const pactPending = pactStatus === 'pending';
               // 已点亮的过去日期用于写印痕；今天与未来未点亮的星点在开启对赌后可点击设目标
               const markTarget = lit && !cell.isFuture && Boolean(onSelectDay);
               const pactTarget = !lit && (cell.isFuture || cell.isToday) && pactEnabled && Boolean(onPactDay);
@@ -305,7 +308,13 @@ export default function StarField({
                   className={`star-slot ${clickable ? 'is-clickable' : ''} ${pactTarget ? 'is-pact-target' : ''}`}
                   onClick={clickable ? (e) => {
                     if (todayBoth) {
-                      setTodayMenu({ key: cell.key, x: e.clientX, y: e.clientY });
+                      // 以星点本身定位菜单，避免程序化点击时事件坐标为 0
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setTodayMenu({
+                        key: cell.key,
+                        x: rect.left + rect.width / 2,
+                        y: rect.bottom
+                      });
                     } else if (pactTarget) {
                       onPactDay(cell.key);
                     } else {
@@ -324,6 +333,9 @@ export default function StarField({
                       isToday: cell.isToday,
                       hasMark,
                       hasPact,
+                      pactStatus,
+                      pactGoal,
+                      pactPending,
                       pactTarget,
                       todayBoth,
                       clickable
@@ -380,12 +392,25 @@ export default function StarField({
             )}
           </div>
           {tip.hasMark && <div className="tip-mark">此处有印痕</div>}
-          {tip.hasPact && <div className="tip-pact">已立下对赌</div>}
+          {tip.hasPact && (
+            <div className="tip-pact">
+              <span>
+                {tip.pactStatus === 'pending'
+                  ? '已立下星辉契约'
+                  : tip.pactStatus === 'done' ? '星辉契约目标达成' : '星辉契约目标未达成'}
+              </span>
+              {tip.pactGoal > 0 && (
+                <span className="tip-pact-goal">
+                  目标 <b style={{ color: starColor }}>{tip.pactGoal.toLocaleString()}</b> 积分
+                </span>
+              )}
+            </div>
+          )}
           {tip.clickable && (
             <div className="tip-hint">
               {tip.todayBoth
-                ? '点击查看印痕或立下对赌'
-                : tip.pactTarget ? '点击设置对赌' : (tip.hasMark ? '点击查看印痕' : '点击写下印痕')}
+                ? '点击查看印痕或立下星辉契约'
+                : tip.pactTarget ? '点击立下星辉契约' : (tip.hasMark ? '点击查看印痕' : '点击写下印痕')}
             </div>
           )}
         </div>
@@ -397,7 +422,7 @@ export default function StarField({
           y={todayMenu.y}
           items={[
             { label: '写下今日印痕', onClick: () => onSelectDay(todayMenu.key) },
-            { label: '为今天立下对赌', onClick: () => onPactDay(todayMenu.key) }
+            { label: '为今天立下星辉契约', onClick: () => onPactDay(todayMenu.key) }
           ]}
           onClose={() => setTodayMenu(null)}
         />

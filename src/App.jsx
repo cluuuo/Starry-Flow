@@ -440,15 +440,9 @@ export default function App() {
     });
   }, [settings, sendFocusCommand, handleSettingsChange]);
 
-  // 对赌：立下 / 修改 / 取消，以及平账
-  const handleSavePact = useCallback(({ date, goal, oldDate }) => {
-    if (oldDate && oldDate !== date) sendFocusCommand('cancel_pact', { date: oldDate });
+  // 对赌：立下后不可取消，已有对赌只允许修改目标积分
+  const handleSavePact = useCallback(({ date, goal }) => {
     sendFocusCommand('set_pact', { date, goal });
-    setPactDay(null);
-  }, [sendFocusCommand]);
-
-  const handleCancelPact = useCallback((date) => {
-    sendFocusCommand('cancel_pact', { date });
     setPactDay(null);
   }, [sendFocusCommand]);
 
@@ -771,7 +765,7 @@ export default function App() {
 
         <div className="star-card-foot">
           <span>今天是第 {dayNumber} 天 · 第 {weekCount} 周</span>
-          <span className="foot-tip">点击点亮的星点写印痕；开启对赌后，今天与未来的星点都能立约</span>
+          <span className="foot-tip">点击星点刻下印痕</span>
         </div>
 
         {demoMode && loaded && (
@@ -828,7 +822,6 @@ export default function App() {
         ratio={(settings.psychology && settings.psychology.pact.ratio) || 80}
         reward={(settings.psychology && settings.psychology.pact.reward) || 100}
         onSave={handleSavePact}
-        onCancel={handleCancelPact}
         onClose={() => setPactDay(null)}
       />
 

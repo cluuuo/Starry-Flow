@@ -40,10 +40,21 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('window:mode', handler);
     return () => ipcRenderer.removeListener('window:mode', handler);
   },
-  miniDragStart: () => ipcRenderer.send('mini:drag-start'),
-  miniDragMove: () => ipcRenderer.send('mini:drag-move'),
-  miniDragEnd: () => ipcRenderer.send('mini:drag-end'),
   activateMini: () => ipcRenderer.send('mini:activate'),
+  setMiniSize: (size) => ipcRenderer.invoke('mini:set-size', size),
+  // 设置页预览开关：主窗口保持显示，只弹出迷你窗口
+  setMiniPreview: (on) => ipcRenderer.invoke('mini:preview', on),
+  getMiniPreview: () => ipcRenderer.invoke('mini:preview-state'),
+  onMiniPreview: (cb) => {
+    const handler = (_event, on) => cb(on);
+    ipcRenderer.on('mini:preview', handler);
+    return () => ipcRenderer.removeListener('mini:preview', handler);
+  },
+  onSettingsChanged: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('settings:changed', handler);
+    return () => ipcRenderer.removeListener('settings:changed', handler);
+  },
   onWindowMaximized: (cb) => {
     const handler = (_event, maximized) => cb(maximized);
     ipcRenderer.on('window:maximized', handler);

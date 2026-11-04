@@ -636,7 +636,7 @@ export default function FocusPanel({
         </div>
         <div className="focus-meta">
           <span>当前速度 {speed} 积分/秒</span>
-          {sleepActive && <span className="focus-sleep-tag">就寝时段</span>}
+          {sleepActive && <span className="focus-sleep-tag">深空契约时段</span>}
           {specialActive && <span className="focus-special-tag">特殊白名单</span>}
           {strict?.enabled && (
             <>
