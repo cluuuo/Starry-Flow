@@ -53,4 +53,12 @@ npm run dist
 
 ## 许可
 
-[MIT License](LICENSE)
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
+
+- 个人使用、学习、研究、修改与非商业分发：允许
+- 任何商业用途、收费销售、商业产品集成：禁止
+- 此前已发布的 2.19.0 及更早版本按当时的 MIT License 授权，不受本次变更影响
+
+字体使用思源黑体（Source Han Sans），遵循 SIL Open Font License 1.1，许可见 [assets/fonts/OFL.txt](assets/fonts/OFL.txt)。
+
+Copyright (c) 2026 cluuuo

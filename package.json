@@ -3,6 +3,7 @@
   "productName": "Starry Flow",
   "version": "2.19.0",
   "description": "Starry Flow 星流 · 专注目标与进度可视化",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -k -n vite,electron \"vite\" \"wait-on http://localhost:5173 && electron . --dev\"",
