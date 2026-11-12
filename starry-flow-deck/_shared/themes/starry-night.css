@@ -1,0 +1,42 @@
+/* theme: starry-night —— 星流 · 深空与星辉 */
+:root{
+  --bg:#070b16;
+  --bg-soft:#05080f;
+  --surface:#0f1729;
+  --surface-2:#16203a;
+  --border:rgba(150,175,225,.14);
+  --border-strong:rgba(150,175,225,.28);
+  --text-1:#eef3ff;
+  --text-2:#aab6d4;
+  --text-3:#707d9e;
+  --accent:#ffe45c;
+  --accent-2:#7fb4ff;
+  --accent-3:#8ef0d8;
+  --good:#7ee0a3;
+  --warn:#ffc773;
+  --bad:#ff8a8a;
+  --grad:linear-gradient(135deg,#ffe45c,#ffb347 52%,#7fb4ff);
+  --grad-soft:linear-gradient(135deg,#0f1729,#16203a);
+  --radius:16px;
+  --radius-sm:10px;
+  --radius-lg:26px;
+  --shadow:0 14px 38px rgba(0,0,0,.5);
+  --shadow-lg:0 30px 80px rgba(0,0,0,.62);
+  --font-sans:'Noto Sans SC','Space Grotesk',sans-serif;
+  --font-display:'Space Grotesk','Noto Sans SC',sans-serif;
+  --letter-tight:-.02em;
+  --bg-texture:
+    radial-gradient(ellipse 70% 50% at 72% 8%, rgba(255,228,92,.07), transparent 60%),
+    radial-gradient(ellipse 62% 46% at 16% 92%, rgba(127,180,255,.07), transparent 62%);
+}
+
+.card{
+  background:linear-gradient(180deg, rgba(255,255,255,.026), transparent 65%), var(--surface);
+}
+
+.kicker{letter-spacing:.18em}
+
+h1.title,.h1{font-family:var(--font-display);font-weight:700}
+h2.title,.h2{font-family:var(--font-display);font-weight:700}
+
+.lede{font-weight:300}
