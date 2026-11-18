@@ -28,3 +28,6 @@ __pycache__/
 
 # 编辑器分享产物
 .trae-html-share-packages/
+
+# 内部交接文档（不上传）
+交接文档.md
