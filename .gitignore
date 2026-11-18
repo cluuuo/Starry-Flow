@@ -29,5 +29,6 @@ __pycache__/
 # 编辑器分享产物
 .trae-html-share-packages/
 
-# 内部交接文档（不上传）
+# 内部交接与开发档案（不上传）
 交接文档.md
+HANDOFF.md
